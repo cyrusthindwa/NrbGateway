@@ -1,0 +1,116 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
+using CHL.NrbGateway.Application.Common.Interfaces;
+using CHL.NrbGateway.Domain.Entities.Config;
+using CHL.NrbGateway.Domain.Enums;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.IdentityModel.Tokens;
+
+namespace CHL.NrbGateway.Infrastructure.Services;
+
+public class BCryptPasswordHasher : IPasswordHasher
+{
+    public string HashPassword(string password) => BCrypt.Net.BCrypt.HashPassword(password);
+    public bool VerifyPassword(string password, string hash) => BCrypt.Net.BCrypt.Verify(password, hash);
+}
+
+public class JwtTokenService : IJwtTokenService
+{
+    private readonly IConfiguration _configuration;
+
+    public JwtTokenService(IConfiguration configuration)
+    {
+        _configuration = configuration;
+    }
+
+    public string GenerateToken(AdminUser adminUser)
+    {
+        var secret = _configuration["Jwt:SecretKey"] ?? "DEFAULT_DEV_JWT_SECRET_KEY_REPLACE_WITH_SECRETS_STORE_IN_PRODUCTION_MIN_256_BITS";
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
+        var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+
+        var claims = new[]
+        {
+            new Claim(JwtRegisteredClaimNames.Sub, adminUser.Id.ToString()),
+            new Claim(JwtRegisteredClaimNames.Email, adminUser.Email),
+            new Claim(ClaimTypes.Name, adminUser.Name),
+            new Claim(ClaimTypes.Role, "CHL_ICT_Admin")
+        };
+
+        var token = new JwtSecurityToken(
+            issuer: _configuration["Jwt:Issuer"] ?? "CHL_NRB_Gateway",
+            audience: _configuration["Jwt:Audience"] ?? "CHL_Portal_Admins",
+            claims: claims,
+            expires: DateTime.UtcNow.AddHours(8),
+            signingCredentials: creds
+        );
+
+        return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+}
+
+public class ApiKeyValidationService : IApiKeyValidationService
+{
+    private readonly IConfigDbContext _configDbContext;
+
+    public ApiKeyValidationService(IConfigDbContext configDbContext)
+    {
+        _configDbContext = configDbContext;
+    }
+
+    public string HashApiKey(string plaintextKey)
+    {
+        if (string.IsNullOrEmpty(plaintextKey)) return string.Empty;
+        using var sha256 = SHA256.Create();
+        var bytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(plaintextKey));
+        return Convert.ToHexStringLower(bytes);
+    }
+
+    public (string plaintextKey, string prefix, string hash) GenerateApiKey()
+    {
+        var randomBytes = new byte[32];
+        using var rng = RandomNumberGenerator.Create();
+        rng.GetBytes(randomBytes);
+
+        var rawBase64 = Convert.ToBase64String(randomBytes)
+            .Replace("+", "")
+            .Replace("/", "")
+            .Replace("=", "");
+
+        var plaintextKey = $"chl_live_{rawBase64}";
+        var prefix = plaintextKey[..12];
+        var hash = HashApiKey(plaintextKey);
+
+        return (plaintextKey, prefix, hash);
+    }
+
+    public async Task<SubsidiaryApiKeyValidationResult> ValidateApiKeyAsync(string apiKey, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            return new SubsidiaryApiKeyValidationResult(false, null, null, null, 0);
+        }
+
+        var keyHash = HashApiKey(apiKey);
+
+        var apiKeyEntry = await _configDbContext.SubsidiaryApiKeys
+            .Include(k => k.Subsidiary)
+            .FirstOrDefaultAsync(k => k.KeyHash == keyHash && k.Status == ApiKeyStatus.ACTIVE, cancellationToken);
+
+        if (apiKeyEntry == null || apiKeyEntry.Subsidiary == null)
+        {
+            return new SubsidiaryApiKeyValidationResult(false, null, null, null, 0);
+        }
+
+        return new SubsidiaryApiKeyValidationResult(
+            IsValid: true,
+            SubsidiaryId: apiKeyEntry.SubsidiaryId,
+            SubsidiaryShortCode: apiKeyEntry.Subsidiary.ShortCode,
+            SubsidiaryName: apiKeyEntry.Subsidiary.Name,
+            RateLimitPerMinute: apiKeyEntry.RateLimitPerMinute
+        );
+    }
+}
