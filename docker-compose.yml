@@ -3,20 +3,90 @@ services:
     image: postgres:18-alpine
     container_name: chl_nrb_gateway_postgres
     restart: unless-stopped
-    ports:
-      - "5433:5432"
     environment:
-      POSTGRES_DB: chl_nrb_gateway
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
+      POSTGRES_DB: ${POSTGRES_DB:-chl_nrb_gateway}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
     volumes:
       - pgdata:/var/lib/postgresql
       - ./scripts/01-init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d chl_nrb_gateway"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-chl_nrb_gateway}"]
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - chl_nrb_network
+
+  minio:
+    image: minio/minio:latest
+    container_name: chl_nrb_gateway_minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - miniodata:/data
+    networks:
+      - chl_nrb_network
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: chl_nrb_gateway_api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__Kyc: Host=postgres;Port=5432;Database=${POSTGRES_DB:-chl_nrb_gateway};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-password};SearchPath=kyc,public
+      ConnectionStrings__Config: Host=postgres;Port=5432;Database=${POSTGRES_DB:-chl_nrb_gateway};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-password};SearchPath=config,public
+      Nrb__BaseUrl: ${NRB_BASE_URL}
+      Nrb__TokenEndpoint: ${NRB_TOKEN_ENDPOINT}
+      Nrb__ClientId: ${NRB_CLIENT_ID}
+      Nrb__ClientSecret: ${NRB_CLIENT_SECRET}
+      Nrb__TextLookupClientId: ${NRB_TEXT_LOOKUP_CLIENT_ID}
+      Nrb__TextLookupClientKey: ${NRB_TEXT_LOOKUP_CLIENT_KEY}
+      Nrb__SimulationMode: ${NRB_SIMULATION_MODE:-false}
+      Jwt__Issuer: ${JWT_ISSUER:-CHL_NRB_Gateway}
+      Jwt__Audience: ${JWT_AUDIENCE:-CHL_Portal_Admins}
+      Jwt__SecretKey: ${JWT_SECRET_KEY}
+      Encryption__HmacKey: ${ENCRYPTION_HMAC_KEY}
+      Encryption__PgpSymKey: ${ENCRYPTION_PGP_KEY}
+      BlobStorage__Endpoint: minio:9000
+      BlobStorage__AccessKey: ${MINIO_ROOT_USER:-minioadmin}
+      BlobStorage__SecretKey: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      BlobStorage__UseSsl: "false"
+      BlobStorage__Bucket: ${MINIO_BUCKET:-nrb-documents}
+    ports:
+      - "${API_PORT:-5050}:5050"
+    networks:
+      - chl_nrb_network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:5050}
+    container_name: chl_nrb_gateway_frontend
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    networks:
+      - chl_nrb_network
 
 volumes:
   pgdata:
+  miniodata:
+
+networks:
+  chl_nrb_network:
+    driver: bridge

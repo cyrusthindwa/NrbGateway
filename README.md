@@ -36,7 +36,7 @@ CHL.NrbGateway.sln
 │   ├── CHL.NrbGateway.Infrastructure/      — EF Core DbContexts, migrations,
 │   │                                         NRB HTTP adapters, repositories, auth services
 │   └── CHL.NrbGateway.Api/                 — Controllers, auth handlers, Program.cs
-│       ├── Gateway/                          → Subsidiary-facing endpoints (X-Api-Key auth)
+│       ├── Gateway/                          → Project-facing endpoints (X-Api-Key auth)
 │       └── Portal/                           → ICT Admin-facing endpoints (JWT Bearer auth)
 └── tests/
     └── CHL.NrbGateway.Tests/               — xUnit unit tests
@@ -47,9 +47,9 @@ CHL.NrbGateway.sln
 | DbContext | Postgres Schema | Postgres Role | Scope |
 |---|---|---|---|
 | `KycDbContext` | `kyc` | `gateway_role` | Individual/Organization KYC data, verification events, gateway audit log |
-| `ConfigDbContext` | `config` | `portal_role` | Admin users, subsidiaries, API keys, tier settings, NRB environment settings |
+| `ConfigDbContext` | `config` | `portal_role` | Admin users, companies, projects, API keys, tier settings, NRB environment settings |
 
-Both contexts target the **same Postgres database** but are strictly isolated by schema and role. `gateway_requests.SubsidiaryId` is a bare `Guid` FK value — there is **no EF navigation property** crossing DbContext boundaries (see note below).
+Both contexts target the **same Postgres database** but are strictly isolated by schema and role. `gateway_requests.ProjectId` is a bare `Guid` FK value — there is **no EF navigation property** crossing DbContext boundaries (see note below).
 
 ---
 
@@ -72,37 +72,31 @@ Both contexts target the **same Postgres database** but are strictly isolated by
 
 ## Getting Started (Local Dev)
 
-### Prerequisites
-- .NET 10 SDK
-- Docker Desktop (for PostgreSQL 18)
-
-### 1. Start PostgreSQL
+### Option A — Full stack with one command (recommended)
 
 ```bash
-docker compose up -d
+# 1. Create your local .env from the template (fill in real secrets)
+cp .env.example .env
+
+# 2. Bring up frontend, API, Postgres, and MinIO
+docker compose up --build
 ```
 
-This starts `postgres:18-alpine`, runs `scripts/01-init.sql` which:
-- Enables `pgcrypto`
-- Creates schemas `kyc` and `config`
-- Creates roles `gateway_role` and `portal_role` with least-privilege grants scoped to their schemas
+This starts four services on a shared Docker network:
+- **frontend** (Next.js) on `http://localhost:${FRONTEND_PORT:-3000}`
+- **api** (ASP.NET Core) on `http://localhost:${API_PORT:-5050}` — the only service that talks to Postgres/MinIO
+- **postgres** (`postgres:18-alpine`) — runs `scripts/01-init.sql` which enables `pgcrypto`, creates schemas `kyc` and `config`, and creates roles `gateway_role` / `portal_role`
+- **minio** (S3-compatible object storage) — holds document blobs referenced by `individual_documents.blob_ref`
 
-### 2. Run EF Core Migrations
+The API applies EF migrations and dev seed data automatically on startup. Only the API and frontend ports are exposed; Postgres and MinIO are internal to the Docker network. A `docker-compose.override.yml` re-exposes Postgres (`5433`) and MinIO (`9000`/`9001`) on the host for local development.
+
+### Option B — Run the API locally against Docker Postgres
 
 ```bash
-# KYC schema migrations
-dotnet ef migrations add InitialKyc \
-  -p src/CHL.NrbGateway.Infrastructure \
-  -s src/CHL.NrbGateway.Api \
-  -c KycDbContext
+# Start only Postgres (and optionally MinIO) with dev ports exposed
+docker compose up -d postgres minio
 
-# Config schema migrations
-dotnet ef migrations add InitialConfig \
-  -p src/CHL.NrbGateway.Infrastructure \
-  -s src/CHL.NrbGateway.Api \
-  -c ConfigDbContext
-
-# Apply both
+# Apply migrations (or let the API apply them on startup)
 dotnet ef database update \
   -p src/CHL.NrbGateway.Infrastructure \
   -s src/CHL.NrbGateway.Api \
@@ -112,11 +106,8 @@ dotnet ef database update \
   -p src/CHL.NrbGateway.Infrastructure \
   -s src/CHL.NrbGateway.Api \
   -c ConfigDbContext
-```
 
-### 3. Run the API
-
-```bash
+# Run the API
 dotnet run --project src/CHL.NrbGateway.Api
 ```
 
@@ -124,20 +115,36 @@ Swagger UI is available at: `https://localhost:{port}/swagger`
 
 **Dev seed data** is auto-seeded on startup (in-memory or Postgres):
 - Admin: `admin@continental.mw` / `Admin123!`
-- Subsidiary: CDH Investment Bank (`CDHIB`)
-- Dev API key: `chl_live_cdhib_dev_key_12345`
+- Company: CDH Investment Bank (`CDHIB`), project `CDHIB — Gateway`
+- Dev API key: `chl_test_cdhib_dev_key_12345`
 
-### 4. Run Tests
+### Run Tests
 
 ```bash
 dotnet test
+```
+
+### Adding migrations
+
+```bash
+# KYC schema
+dotnet ef migrations add <Name> \
+  -p src/CHL.NrbGateway.Infrastructure \
+  -s src/CHL.NrbGateway.Api \
+  -c KycDbContext
+
+# Config schema
+dotnet ef migrations add <Name> \
+  -p src/CHL.NrbGateway.Infrastructure \
+  -s src/CHL.NrbGateway.Api \
+  -c ConfigDbContext
 ```
 
 ---
 
 ## API Quick Reference
 
-### Gateway (Subsidiary-facing, `X-Api-Key` auth)
+### Gateway (Project-facing, `X-Api-Key` auth)
 
 | Method | Route | Description |
 |---|---|---|
@@ -148,11 +155,13 @@ dotnet test
 | Method | Route | Description |
 |---|---|---|
 | `POST` | `/api/v1/portal/auth/login` | Admin login, returns JWT |
-| `GET` | `/api/v1/portal/subsidiaries` | List subsidiaries |
-| `POST` | `/api/v1/portal/subsidiaries` | Create subsidiary |
-| `GET` | `/api/v1/portal/subsidiaries/{id}/api-keys` | List API keys |
-| `POST` | `/api/v1/portal/subsidiaries/{id}/api-keys` | Issue/rotate API key |
-| `POST` | `/api/v1/portal/subsidiaries/{id}/api-keys/{keyId}/revoke` | Revoke API key |
+| `GET` | `/api/v1/portal/companies` | List companies |
+| `POST` | `/api/v1/portal/companies` | Create company |
+| `GET` | `/api/v1/portal/projects` | List projects |
+| `POST` | `/api/v1/portal/projects` | Create project |
+| `GET` | `/api/v1/portal/projects/{id}/api-keys` | List API keys |
+| `POST` | `/api/v1/portal/projects/{id}/api-keys` | Issue/rotate API key |
+| `POST` | `/api/v1/portal/projects/{id}/api-keys/{keyId}/revoke` | Revoke API key |
 | `GET` | `/api/v1/portal/settings/tiers` | Get tier settings |
 | `PUT` | `/api/v1/portal/settings/tiers/{tier}` | Enable/disable a tier |
 | `GET` | `/api/v1/portal/settings/nrb-environment` | Get NRB environment URLs |
@@ -172,9 +181,9 @@ dotnet test
 
 ## Cross-Schema Navigation Note
 
-`gateway_requests` in the `kyc` schema references `subsidiary_id` from the `config` schema's `subsidiaries` table. To maintain clean DbContext boundary separation and enable the future split, this is stored as a bare `Guid` with **no EF Core navigation property** across DbContext boundaries.
+`gateway_requests` in the `kyc` schema references `project_id` from the `config` schema's `projects` table. To maintain clean DbContext boundary separation and enable the future split, this is stored as a bare `Guid` with **no EF Core navigation property** across DbContext boundaries.
 
-**To look up a subsidiary for a request**: query `ConfigDbContext.Subsidiaries` separately using the `SubsidiaryId` value. Each subsidiary will only match requests with `GatewayRequest.SubsidiaryId == subsidiary.Id` — the boundary is by subsidiary identity, not by data sharing.
+**To look up a project for a request**: query `ConfigDbContext.Projects` separately using the `ProjectId` value. Each project will only match requests with `GatewayRequest.ProjectId == project.Id` — the boundary is by project identity, not by data sharing.
 
 ---
 

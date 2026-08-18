@@ -1,0 +1,19 @@
+# Development-only overrides.
+#
+# The base docker-compose.yml reflects the real deployment topology — only the
+# API and frontend ports are exposed. This file re-exposes Postgres and the
+# MinIO API/console on the host purely for local development convenience
+# (e.g. running `dotnet ef database update` or inspecting blobs from a local
+# MinIO client).
+#
+# Docker Compose loads this file automatically alongside docker-compose.yml.
+
+services:
+  postgres:
+    ports:
+      - "5433:5432"
+
+  minio:
+    ports:
+      - "9000:9000"   # S3-compatible API
+      - "9001:9001"   # Web console
