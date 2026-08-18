@@ -7,7 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useRouter, useParams } from "next/navigation";
 import { apiService } from "@/services/api";
 import { ArrowLeft, Key, RotateCw, Ban, Save } from "lucide-react";
-import type { Subsidiary, SubsidiaryApiKey, DailyUsage } from "@/types";
+import type { Project, ProjectApiKey, DailyUsage } from "@/types";
 import {
   BarChart,
   Bar,
@@ -18,13 +18,13 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
-export default function SubsidiaryDetailPage() {
+export default function ProjectDetailPage() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const router = useRouter();
   const params = useParams();
   const id = params.id as string;
-  const [subsidiary, setSubsidiary] = useState<Subsidiary | null>(null);
-  const [apiKeys, setApiKeys] = useState<SubsidiaryApiKey[]>([]);
+  const [project, setProject] = useState<Project | null>(null);
+  const [apiKeys, setApiKeys] = useState<ProjectApiKey[]>([]);
   const [usage, setUsage] = useState<DailyUsage[]>([]);
   const [rateLimit, setRateLimit] = useState(1200);
   const [isLoading, setIsLoading] = useState(true);
@@ -42,20 +42,20 @@ export default function SubsidiaryDetailPage() {
 
   async function loadData() {
     try {
-      const [subs, keys, u] = await Promise.all([
-        apiService.getSubsidiaries(),
-        apiService.getSubsidiaryApiKeys(id),
-        apiService.getSubsidiaryUsage(id),
+      const [projects, keys, u] = await Promise.all([
+        apiService.getProjects(),
+        apiService.getProjectApiKeys(id),
+        apiService.getProjectUsage(id),
       ]);
-      const sub = subs.find((s) => s.id === id) || null;
-      setSubsidiary(sub);
+      const proj = projects.find((p) => p.id === id) || null;
+      setProject(proj);
       setApiKeys(keys);
       setUsage(u);
       if (keys.length > 0) {
         setRateLimit(keys[0].rateLimitPerMinute);
       }
     } catch (err) {
-      console.error("Failed to load subsidiary data:", err);
+      console.error("Failed to load project data:", err);
     } finally {
       setIsLoading(false);
     }
@@ -109,7 +109,7 @@ export default function SubsidiaryDetailPage() {
       {/* Header */}
       <div className="flex items-center gap-3 mb-6">
         <button
-          onClick={() => router.push("/subsidiaries")}
+          onClick={() => router.push("/projects")}
           className="p-2 hover:bg-white rounded-lg transition-colors"
         >
           <ArrowLeft size={20} className="text-slate-500" />
@@ -117,11 +117,11 @@ export default function SubsidiaryDetailPage() {
         <div>
           <div className="flex items-center gap-3">
             <h2 className="text-xl font-bold text-navy-800">
-              {subsidiary?.name || "Subsidiary"}
+              {project?.name || "Project"}
             </h2>
             <Badge variant="success">Active</Badge>
           </div>
-          <p className="text-sm text-slate-500">{subsidiary?.shortCode}</p>
+          <p className="text-sm text-slate-500">{project?.shortCode}</p>
         </div>
       </div>
 
@@ -162,7 +162,7 @@ export default function SubsidiaryDetailPage() {
           {apiKeys.length === 0 ? (
             <div className="text-center py-8">
               <p className="text-slate-500 text-sm mb-4">
-                No API keys configured for this subsidiary.
+                No API keys configured for this project.
               </p>
               <Button variant="primary" onClick={handleCreateKey}>
                 <Key size={16} />
@@ -176,7 +176,7 @@ export default function SubsidiaryDetailPage() {
                   <div className="flex items-center gap-2 mb-2">
                     <StatusDot status={key.status} />
                     <span className="text-xs font-medium text-slate-500 uppercase">
-                      PRODUCTION KEY
+                      API KEY
                     </span>
                   </div>
                   <p className="font-mono text-sm text-navy-800 mb-3">
@@ -277,20 +277,8 @@ export default function SubsidiaryDetailPage() {
                   tickLine={false}
                   tickFormatter={(v) => `${(v / 1000).toFixed(1)}k`}
                 />
-                <Tooltip
-                  contentStyle={{
-                    borderRadius: "8px",
-                    border: "1px solid #e2e8f0",
-                    boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)",
-                  }}
-                  formatter={(value) => [`${(value as number).toLocaleString()} requests`]}
-                />
-                <Bar
-                  dataKey="requests"
-                  fill="#f58220"
-                  radius={[4, 4, 0, 0]}
-                  maxBarSize={40}
-                />
+                <Tooltip />
+                <Bar dataKey="requests" fill="#f97316" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           ) : (
@@ -298,11 +286,6 @@ export default function SubsidiaryDetailPage() {
               No usage data available.
             </div>
           )}
-          <div className="flex justify-between mt-2 text-xs text-slate-400">
-            {usage.map((d) => (
-              <span key={d.day}>{d.day}</span>
-            ))}
-          </div>
         </Card>
       </div>
     </PortalLayout>

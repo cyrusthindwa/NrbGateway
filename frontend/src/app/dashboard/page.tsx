@@ -147,8 +147,8 @@ export default function DashboardPage() {
       <div className="grid grid-cols-4 gap-5 mb-8">
         <StatCard
           label="ACTIVE PROJECTS"
-          value={metrics?.activeSubsidiaries ?? "-"}
-          subValue={`↑ ${metrics?.activeSubsidiariesChange ?? 0} this month`}
+          value={metrics?.activeProjects ?? "-"}
+          subValue={`↑ ${metrics?.activeProjectsChange ?? 0} this month`}
           icon={<Building2 size={20} />}
           color="green"
         />

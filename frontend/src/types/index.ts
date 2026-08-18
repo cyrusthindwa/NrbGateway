@@ -8,16 +8,24 @@ export interface AdminUser {
   createdAt: string;
 }
 
-export interface Subsidiary {
+export interface Company {
   id: string;
   name: string;
   shortCode: string;
   createdAt: string;
 }
 
-export interface SubsidiaryApiKey {
+export interface Project {
   id: string;
-  subsidiaryId: string;
+  companyId: string;
+  name: string;
+  shortCode: string;
+  createdAt: string;
+}
+
+export interface ProjectApiKey {
+  id: string;
+  projectId: string;
   keyPrefix: string;
   plaintextApiKey?: string;
   status: "ACTIVE" | "REVOKED";
@@ -29,6 +37,7 @@ export interface SubsidiaryApiKey {
 export interface TierSetting {
   tier: "BASIC" | "TEXT_LOOKUP" | "INTERMEDIATE" | "ADVANCED";
   enabled: boolean;
+  costPerRequest: number;
   updatedAt: string;
   updatedBy: string;
 }
@@ -44,14 +53,6 @@ export interface EnvironmentSetting {
   updatedBy: string;
 }
 
-export interface CachePolicy {
-  biographicRecordFreshness: number;
-  biographicRecordFreshnessUnit: "HOURS" | "DAYS" | "MONTHS";
-  verificationEventFreshness: number;
-  verificationEventFreshnessUnit: "HOURS" | "DAYS" | "MONTHS";
-  auditLogRetentionDays: number;
-}
-
 export interface AuditLogEntry {
   id: string;
   timestamp: string;
@@ -63,8 +64,8 @@ export interface AuditLogEntry {
 }
 
 export interface DashboardMetrics {
-  activeSubsidiaries: number;
-  activeSubsidiariesChange: number;
+  activeProjects: number;
+  activeProjectsChange: number;
   requestsToday: number;
   requestsTodayChange: number;
   cacheHitRate: number;

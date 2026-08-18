@@ -5,9 +5,7 @@ import { usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   LayoutDashboard,
-  Building2,
   ShieldCheck,
-  Database,
   ScrollText,
   Users,
   LogOut,
@@ -16,9 +14,8 @@ import {
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/subsidiaries", label: "API Keys", icon: Key },
+  { href: "/projects", label: "Projects", icon: Key },
   { href: "/verification-tiers", label: "Verification Tiers", icon: ShieldCheck },
-  { href: "/policy", label: "Cache & Retention Policy", icon: Database },
   { href: "/audit-log", label: "Audit Log", icon: ScrollText },
   { href: "/admin-users", label: "Admin Users", icon: Users },
 ];

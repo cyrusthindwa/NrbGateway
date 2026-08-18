@@ -123,14 +123,14 @@ export default function VerificationTiersPage() {
 
   const getTierFromList = (key: string): TierSetting => {
     const found = tiers.find((t) => t.tier === key);
-    return found || { tier: key as TierSetting["tier"], enabled: false, updatedAt: "", updatedBy: "" };
+    return found || { tier: key as TierSetting["tier"], enabled: false, costPerRequest: 0, updatedAt: "", updatedBy: "" };
   };
 
   return (
     <PortalLayout>
       <PageHeader
         title="Verification Tiers"
-        description="Manage and configure the active verification endpoints for the gateway. Changes made here apply across all configured API keys unless overridden at the subsidiary level."
+        description="Manage and configure the active verification endpoints for the gateway. Changes made here apply across all configured API keys unless overridden at the project level."
       />
 
       {/* Tier Cards */}

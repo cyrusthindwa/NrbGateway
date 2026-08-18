@@ -1,11 +1,11 @@
 import type {
   LoginRequest,
   LoginResponse,
-  Subsidiary,
-  SubsidiaryApiKey,
+  Company,
+  Project,
+  ProjectApiKey,
   TierSetting,
   EnvironmentSetting,
-  CachePolicy,
   AuditLogEntry,
   DashboardMetrics,
   RecentChange,
@@ -77,36 +77,46 @@ export const apiService = {
       body: JSON.stringify({ enabled }),
     }),
 
-  // Subsidiaries
-  getSubsidiaries: (): Promise<Subsidiary[]> =>
-    fetchWithAuth("/api/v1/portal/subsidiaries"),
+  // Companies
+  getCompanies: (): Promise<Company[]> =>
+    fetchWithAuth("/api/v1/portal/companies"),
 
-  createSubsidiary: (data: { name: string; shortCode: string }): Promise<Subsidiary> =>
-    fetchWithAuth("/api/v1/portal/subsidiaries", {
+  createCompany: (data: { name: string; shortCode: string }): Promise<Company> =>
+    fetchWithAuth("/api/v1/portal/companies", {
       method: "POST",
       body: JSON.stringify(data),
     }),
 
-  deleteSubsidiary: (id: string): Promise<void> =>
-    fetchWithAuth(`/api/v1/portal/subsidiaries/${id}`, { method: "DELETE" }),
+  // Projects
+  getProjects: (): Promise<Project[]> =>
+    fetchWithAuth("/api/v1/portal/projects"),
 
-  getSubsidiaryApiKeys: (id: string): Promise<SubsidiaryApiKey[]> =>
-    fetchWithAuth(`/api/v1/portal/subsidiaries/${id}/api-keys`),
+  createProject: (data: { companyId: string; name: string; shortCode: string }): Promise<Project> =>
+    fetchWithAuth("/api/v1/portal/projects", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
 
-  createApiKey: (subsidiaryId: string): Promise<SubsidiaryApiKey> =>
-    fetchWithAuth(`/api/v1/portal/subsidiaries/${subsidiaryId}/api-keys`, {
+  deleteProject: (id: string): Promise<void> =>
+    fetchWithAuth(`/api/v1/portal/projects/${id}`, { method: "DELETE" }),
+
+  getProjectApiKeys: (id: string): Promise<ProjectApiKey[]> =>
+    fetchWithAuth(`/api/v1/portal/projects/${id}/api-keys`),
+
+  createApiKey: (projectId: string): Promise<ProjectApiKey> =>
+    fetchWithAuth(`/api/v1/portal/projects/${projectId}/api-keys`, {
       method: "POST",
     }),
 
-  rotateApiKey: (subsidiaryId: string, keyId: string): Promise<SubsidiaryApiKey> =>
+  rotateApiKey: (projectId: string, keyId: string): Promise<ProjectApiKey> =>
     fetchWithAuth(
-      `/api/v1/portal/subsidiaries/${subsidiaryId}/api-keys/${keyId}/rotate`,
+      `/api/v1/portal/projects/${projectId}/api-keys/${keyId}/rotate`,
       { method: "POST" }
     ),
 
-  revokeApiKey: (subsidiaryId: string, keyId: string): Promise<void> =>
+  revokeApiKey: (projectId: string, keyId: string): Promise<void> =>
     fetchWithAuth(
-      `/api/v1/portal/subsidiaries/${subsidiaryId}/api-keys/${keyId}/revoke`,
+      `/api/v1/portal/projects/${projectId}/api-keys/${keyId}/revoke`,
       { method: "POST" }
     ),
 
@@ -116,16 +126,6 @@ export const apiService = {
 
   updateEnvironmentSetting: (data: Partial<EnvironmentSetting>): Promise<EnvironmentSetting> =>
     fetchWithAuth("/api/v1/portal/settings/nrb-environment", {
-      method: "PUT",
-      body: JSON.stringify(data),
-    }),
-
-  // Cache Policy
-  getCachePolicy: (): Promise<CachePolicy> =>
-    fetchWithAuth("/api/v1/portal/settings/cache-policy"),
-
-  updateCachePolicy: (data: CachePolicy): Promise<CachePolicy> =>
-    fetchWithAuth("/api/v1/portal/settings/cache-policy", {
       method: "PUT",
       body: JSON.stringify(data),
     }),
@@ -153,9 +153,9 @@ export const apiService = {
   getAdminUsers: (): Promise<PaginatedResponse<AdminUser>> =>
     fetchWithAuth("/api/v1/portal/admin-users"),
 
-  // Subsidiary usage
-  getSubsidiaryUsage: (id: string): Promise<DailyUsage[]> =>
-    fetchWithAuth(`/api/v1/portal/subsidiaries/${id}/usage`),
+  // Project usage
+  getProjectUsage: (id: string): Promise<DailyUsage[]> =>
+    fetchWithAuth(`/api/v1/portal/projects/${id}/usage`),
 
   // Maintenance — batch revalidation of local NRB mirror
   revalidateAll: (): Promise<RevalidationResult> =>
