@@ -1,3 +1,4 @@
+using CHL.NrbGateway.Domain.Enums;
 using CHL.NrbGateway.Infrastructure.Services;
 using Xunit;
 
@@ -40,29 +41,45 @@ public class ApiKeyValidationServiceTests
     [Fact]
     public void GenerateApiKey_ReturnsDifferentKeysEachCall()
     {
-        var (k1, _, _) = _service.GenerateApiKey();
-        var (k2, _, _) = _service.GenerateApiKey();
+        var (k1, _, _) = _service.GenerateApiKey(ApiKeyEnvironment.TEST);
+        var (k2, _, _) = _service.GenerateApiKey(ApiKeyEnvironment.TEST);
         Assert.NotEqual(k1, k2);
     }
 
     [Fact]
     public void GenerateApiKey_PrefixMatchesKeyStart()
     {
-        var (key, prefix, _) = _service.GenerateApiKey();
+        var (key, prefix, _) = _service.GenerateApiKey(ApiKeyEnvironment.TEST);
         Assert.StartsWith(prefix, key);
     }
 
     [Fact]
     public void GenerateApiKey_HashMatchesKeyHash()
     {
-        var (key, _, hash) = _service.GenerateApiKey();
+        var (key, _, hash) = _service.GenerateApiKey(ApiKeyEnvironment.TEST);
         Assert.Equal(_service.HashApiKey(key), hash);
     }
 
     [Fact]
-    public void GenerateApiKey_KeyStartsWithChlLivePrefix()
+    public void GenerateApiKey_TestEnvironment_UsesChlTestPrefix()
     {
-        var (key, _, _) = _service.GenerateApiKey();
+        var (key, _, _) = _service.GenerateApiKey(ApiKeyEnvironment.TEST);
+        Assert.StartsWith("chl_test_", key);
+    }
+
+    [Fact]
+    public void GenerateApiKey_LiveEnvironment_UsesChlLivePrefix()
+    {
+        var (key, _, _) = _service.GenerateApiKey(ApiKeyEnvironment.LIVE);
         Assert.StartsWith("chl_live_", key);
+    }
+
+    [Fact]
+    public void GenerateApiKey_DoesNotContainBase64Padding()
+    {
+        var (key, _, _) = _service.GenerateApiKey(ApiKeyEnvironment.TEST);
+        Assert.DoesNotContain("=", key);
+        Assert.DoesNotContain("+", key);
+        Assert.DoesNotContain("/", key);
     }
 }
