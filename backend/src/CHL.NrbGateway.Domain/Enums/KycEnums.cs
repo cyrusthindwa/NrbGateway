@@ -82,3 +82,37 @@ public enum ServedFrom
     CACHE,
     NRB
 }
+
+public enum DocumentType
+{
+    FINGERPRINT,
+    FACE,
+    SIGNATURE
+}
+
+public enum DocumentSource
+{
+    TEXT_LOOKUP,
+    ADVANCED
+}
+
+public enum FieldSource
+{
+    BASIC,
+    TEXT_LOOKUP,
+    ADVANCED
+}
+
+public enum ResponseMode
+{
+    MATCH_ONLY,
+    OTP_SENT,
+    DETAILED,
+    FIELD_CHECK
+}
+
+public enum TriggerSource
+{
+    PROJECT_REQUEST,
+    REVALIDATION
+}
