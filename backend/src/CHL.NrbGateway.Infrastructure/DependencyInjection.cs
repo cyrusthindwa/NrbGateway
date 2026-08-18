@@ -56,6 +56,9 @@ public static class DependencyInjection
         services.AddSingleton<IJwtTokenService, JwtTokenService>();
         services.AddScoped<IApiKeyValidationService, ApiKeyValidationService>();
 
+        // 3b. Object storage (MinIO / S3-compatible)
+        services.AddSingleton<IBlobStorageService, MinioBlobStorageService>();
+
         // 4. NRB Auth Providers (split by auth mechanism)
         services.AddSingleton<OAuthAuthProvider>();
         services.AddSingleton<ClientKeyAuthProvider>();

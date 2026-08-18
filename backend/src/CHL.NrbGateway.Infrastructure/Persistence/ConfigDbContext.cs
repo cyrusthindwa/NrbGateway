@@ -9,12 +9,18 @@ public class ConfigDbContext : DbContext, IConfigDbContext
     public ConfigDbContext(DbContextOptions<ConfigDbContext> options) : base(options) { }
 
     public IQueryable<AdminUser> AdminUsers => Set<AdminUser>();
-    public IQueryable<Subsidiary> Subsidiaries => Set<Subsidiary>();
-    public IQueryable<SubsidiaryApiKey> SubsidiaryApiKeys => Set<SubsidiaryApiKey>();
+    public IQueryable<Company> Companies => Set<Company>();
+    public IQueryable<Project> Projects => Set<Project>();
+    public IQueryable<ProjectApiKey> ProjectApiKeys => Set<ProjectApiKey>();
     public IQueryable<VerificationTierSetting> VerificationTierSettings => Set<VerificationTierSetting>();
     public IQueryable<NrbEnvironmentSetting> NrbEnvironmentSettings => Set<NrbEnvironmentSetting>();
-    public IQueryable<CacheRetentionPolicy> CacheRetentionPolicies => Set<CacheRetentionPolicy>();
     public IQueryable<ConfigAuditLog> ConfigAuditLogs => Set<ConfigAuditLog>();
+    public IQueryable<RevalidationBatch> RevalidationBatches => Set<RevalidationBatch>();
+    public IQueryable<MonthlyUsageReport> MonthlyUsageReports => Set<MonthlyUsageReport>();
+    public IQueryable<BillingInvoice> BillingInvoices => Set<BillingInvoice>();
+    public IQueryable<NrbHealthCheck> NrbHealthChecks => Set<NrbHealthCheck>();
+    public IQueryable<NrbDowntimeIncident> NrbDowntimeIncidents => Set<NrbDowntimeIncident>();
+    public IQueryable<NotificationChannel> NotificationChannels => Set<NotificationChannel>();
 
     void IConfigDbContext.Add<TEntity>(TEntity entity) where TEntity : class => base.Add(entity);
     void IConfigDbContext.Update<TEntity>(TEntity entity) where TEntity : class => base.Update(entity);
@@ -34,23 +40,34 @@ public class ConfigDbContext : DbContext, IConfigDbContext
             entity.Property(e => e.Status).HasConversion<string>();
         });
 
-        modelBuilder.Entity<Subsidiary>(entity =>
+        modelBuilder.Entity<Company>(entity =>
         {
-            entity.ToTable("subsidiaries");
+            entity.ToTable("companies");
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => e.ShortCode).IsUnique();
         });
 
-        modelBuilder.Entity<SubsidiaryApiKey>(entity =>
+        modelBuilder.Entity<Project>(entity =>
         {
-            entity.ToTable("subsidiary_api_keys");
+            entity.ToTable("projects");
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.ShortCode).IsUnique();
+
+            entity.HasOne(e => e.Company)
+                .WithMany(c => c.Projects)
+                .HasForeignKey(e => e.CompanyId);
+        });
+
+        modelBuilder.Entity<ProjectApiKey>(entity =>
+        {
+            entity.ToTable("project_api_keys");
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => e.KeyHash).IsUnique();
             entity.Property(e => e.Status).HasConversion<string>();
 
-            entity.HasOne(e => e.Subsidiary)
-                .WithMany(s => s.ApiKeys)
-                .HasForeignKey(e => e.SubsidiaryId);
+            entity.HasOne(e => e.Project)
+                .WithMany(p => p.ApiKeys)
+                .HasForeignKey(e => e.ProjectId);
 
             entity.HasOne(e => e.CreatedByAdmin)
                 .WithMany(a => a.CreatedApiKeys)
@@ -62,6 +79,7 @@ public class ConfigDbContext : DbContext, IConfigDbContext
             entity.ToTable("verification_tier_settings");
             entity.HasKey(e => e.Tier);
             entity.Property(e => e.Tier).HasConversion<string>();
+            entity.Property(e => e.CostPerRequest).HasColumnType("decimal(10,2)");
 
             entity.HasOne(e => e.UpdatedByAdmin)
                 .WithMany(a => a.UpdatedTierSettings)
@@ -79,18 +97,6 @@ public class ConfigDbContext : DbContext, IConfigDbContext
                 .HasForeignKey(e => e.UpdatedBy);
         });
 
-        modelBuilder.Entity<CacheRetentionPolicy>(entity =>
-        {
-            entity.ToTable("cache_retention_policy");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.DataType).HasConversion<string>();
-            entity.Property(e => e.FreshnessUnit).HasConversion<string>();
-
-            entity.HasOne(e => e.UpdatedByAdmin)
-                .WithMany(a => a.UpdatedCachePolicies)
-                .HasForeignKey(e => e.UpdatedBy);
-        });
-
         modelBuilder.Entity<ConfigAuditLog>(entity =>
         {
             entity.ToTable("config_audit_log");
@@ -105,6 +111,72 @@ public class ConfigDbContext : DbContext, IConfigDbContext
                 .WithMany()
                 .HasForeignKey(e => e.RollbackOfId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<RevalidationBatch>(entity =>
+        {
+            entity.ToTable("revalidation_batches");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TriggerType).HasConversion<string>();
+
+            entity.HasOne(e => e.Initiator)
+                .WithMany()
+                .HasForeignKey(e => e.InitiatedBy)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<MonthlyUsageReport>(entity =>
+        {
+            entity.ToTable("monthly_usage_reports");
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => new { e.ProjectId, e.PeriodYear, e.PeriodMonth }).IsUnique();
+            entity.Property(e => e.TotalCost).HasColumnType("decimal(10,2)");
+        });
+
+        modelBuilder.Entity<BillingInvoice>(entity =>
+        {
+            entity.ToTable("billing_invoices");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TotalAmount).HasColumnType("decimal(10,2)");
+            entity.Property(e => e.Status).HasConversion<string>();
+
+            entity.HasOne(e => e.Company)
+                .WithMany()
+                .HasForeignKey(e => e.CompanyId);
+
+            entity.HasOne(e => e.GeneratedByAdmin)
+                .WithMany()
+                .HasForeignKey(e => e.GeneratedBy)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<NrbHealthCheck>(entity =>
+        {
+            entity.ToTable("nrb_health_checks");
+            entity.HasKey(e => e.Id);
+        });
+
+        modelBuilder.Entity<NrbDowntimeIncident>(entity =>
+        {
+            entity.ToTable("nrb_downtime_incidents");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.DetectedBy).HasConversion<string>();
+
+            entity.HasOne(e => e.ResolvedByAdmin)
+                .WithMany()
+                .HasForeignKey(e => e.ResolvedBy)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<NotificationChannel>(entity =>
+        {
+            entity.ToTable("notification_channels");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ChannelType).HasConversion<string>();
+
+            entity.HasOne(e => e.CreatedByAdmin)
+                .WithMany(a => a.CreatedNotificationChannels)
+                .HasForeignKey(e => e.CreatedBy);
         });
     }
 }

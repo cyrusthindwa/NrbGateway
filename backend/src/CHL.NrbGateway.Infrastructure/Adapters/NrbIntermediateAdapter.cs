@@ -51,7 +51,7 @@ public class NrbIntermediateAdapter : INrbTierAdapter
         {
             national_id = request.NationalId,
             biometric_blob = request.BiometricBlob,
-            requesting_subsidiary = request.SubsidiaryCode
+            requesting_project = request.ProjectCode
         };
         httpRequest.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
 
@@ -165,7 +165,7 @@ public class NrbIntermediateAdapter : INrbTierAdapter
         using var httpRequest = new HttpRequestMessage(HttpMethod.Get, endpointUrl);
         await _clientKeyAuth.ApplyAuthAsync(httpRequest, cancellationToken);
 
-        _logger.LogInformation("NRB Text Lookup → GET {Url}", endpointUrl);
+        _logger.LogInformation("NRB Text Lookup → GET {Url}", $"{baseUrl.TrimEnd('/')}/api/person");
 
         try
         {
@@ -277,11 +277,22 @@ public class NrbIntermediateAdapter : INrbTierAdapter
                 string? confirmationToken = root.TryGetProperty("confirmation_token", out var ct) ? ct.GetString() : null;
                 string phase = root.TryGetProperty("phase", out var p) ? p.GetString() ?? NrbAdvancedPhase.OtpSent : NrbAdvancedPhase.OtpSent;
 
-                return new NrbAdvancedResponseModel(isSuccess, maskedMobile, confirmationToken, phase);
+                // Branch on the response shape: OTP_SENT vs a direct detailed response.
+                var person = ParseAdvancedPerson(root);
+                var blobs = ParseAdvancedBlobs(root);
+                bool hasDetailedData = person != null || (blobs != null && blobs.Count > 0);
+
+                var responseMode = phase == NrbAdvancedPhase.OtpSent && !hasDetailedData
+                    ? ResponseMode.OTP_SENT
+                    : (hasDetailedData ? ResponseMode.DETAILED : ResponseMode.OTP_SENT);
+
+                return new NrbAdvancedResponseModel(isSuccess, maskedMobile, confirmationToken, phase,
+                    responseMode, person, blobs);
             }
 
             _logger.LogWarning("NRB Advanced HTTP {Code}: {Body}", response.StatusCode, responseBody);
-            return new NrbAdvancedResponseModel(false, null, null, NrbAdvancedPhase.OtpSent);
+            return new NrbAdvancedResponseModel(false, null, null, NrbAdvancedPhase.OtpSent,
+                ResponseMode.OTP_SENT, null, null);
         }
         catch (Exception ex)
         {
@@ -302,5 +313,53 @@ public class NrbIntermediateAdapter : INrbTierAdapter
     {
         var str = GetString(element, propertyName);
         return str != null && DateOnly.TryParse(str, out var d) ? d : DateOnly.MinValue;
+    }
+
+    private static NrbAdvancedPersonData? ParseAdvancedPerson(JsonElement root)
+    {
+        var person = root.TryGetProperty("person", out var p) && p.ValueKind == JsonValueKind.Object
+            ? p
+            : (root.TryGetProperty("data", out var d) && d.ValueKind == JsonValueKind.Object ? d : default);
+
+        if (person.ValueKind != JsonValueKind.Object) return null;
+
+        return new NrbAdvancedPersonData(
+            GetString(person, "Surname") ?? GetString(person, "surname"),
+            GetString(person, "FirstName") ?? GetString(person, "first_name"),
+            GetString(person, "OtherNames") ?? GetString(person, "other_names"),
+            GetString(person, "Gender") ?? GetString(person, "gender"),
+            GetString(person, "CivilStatus") ?? GetString(person, "civil_status"),
+            GetString(person, "BirthDistrict") ?? GetString(person, "birth_district"),
+            GetString(person, "PlaceOfPermanentResidence") ?? GetString(person, "place_of_permanent_residence"),
+            ParseNullableDate(person, "Date_of_birth"),
+            ParseNullableDate(person, "Issue_date"),
+            ParseNullableDate(person, "Expiry_date"),
+            GetString(person, "CardStatus") ?? GetString(person, "card_status"),
+            GetString(person, "MiddlewareStatus") ?? GetString(person, "middleware_status")
+        );
+    }
+
+    private static List<NrbAdvancedBlob>? ParseAdvancedBlobs(JsonElement root)
+    {
+        if (!root.TryGetProperty("blobs", out var blobs) || blobs.ValueKind != JsonValueKind.Array)
+            return null;
+
+        var result = new List<NrbAdvancedBlob>();
+        foreach (var b in blobs.EnumerateArray())
+        {
+            result.Add(new NrbAdvancedBlob(
+                GetString(b, "Description") ?? GetString(b, "description"),
+                GetString(b, "BlobType") ?? GetString(b, "blob_type"),
+                GetString(b, "BlobIndex") ?? GetString(b, "blob_index"),
+                GetString(b, "Data") ?? GetString(b, "data")
+            ));
+        }
+        return result;
+    }
+
+    private static DateOnly? ParseNullableDate(JsonElement element, string propertyName)
+    {
+        var str = GetString(element, propertyName);
+        return str != null && DateOnly.TryParse(str, out var d) ? d : null;
     }
 }

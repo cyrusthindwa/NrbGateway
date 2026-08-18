@@ -5,6 +5,7 @@ using System.Text;
 using CHL.NrbGateway.Application.Common.Interfaces;
 using CHL.NrbGateway.Domain.Entities.Config;
 using CHL.NrbGateway.Domain.Enums;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
@@ -69,47 +70,45 @@ public class ApiKeyValidationService : IApiKeyValidationService
         return Convert.ToHexStringLower(bytes);
     }
 
-    public (string plaintextKey, string prefix, string hash) GenerateApiKey()
+    public (string plaintextKey, string prefix, string hash) GenerateApiKey(ApiKeyEnvironment environment)
     {
         var randomBytes = new byte[32];
         using var rng = RandomNumberGenerator.Create();
         rng.GetBytes(randomBytes);
 
-        var rawBase64 = Convert.ToBase64String(randomBytes)
-            .Replace("+", "")
-            .Replace("/", "")
-            .Replace("=", "");
+        var rawBase64 = WebEncoders.Base64UrlEncode(randomBytes);
 
-        var plaintextKey = $"chl_live_{rawBase64}";
+        var keyPrefix = environment == ApiKeyEnvironment.LIVE ? "chl_live_" : "chl_test_";
+        var plaintextKey = $"{keyPrefix}{rawBase64}";
         var prefix = plaintextKey[..12];
         var hash = HashApiKey(plaintextKey);
 
         return (plaintextKey, prefix, hash);
     }
 
-    public async Task<SubsidiaryApiKeyValidationResult> ValidateApiKeyAsync(string apiKey, CancellationToken cancellationToken = default)
+    public async Task<ProjectApiKeyValidationResult> ValidateApiKeyAsync(string apiKey, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(apiKey))
         {
-            return new SubsidiaryApiKeyValidationResult(false, null, null, null, 0);
+            return new ProjectApiKeyValidationResult(false, null, null, null, 0);
         }
 
         var keyHash = HashApiKey(apiKey);
 
-        var apiKeyEntry = await _configDbContext.SubsidiaryApiKeys
-            .Include(k => k.Subsidiary)
+        var apiKeyEntry = await _configDbContext.ProjectApiKeys
+            .Include(k => k.Project)
             .FirstOrDefaultAsync(k => k.KeyHash == keyHash && k.Status == ApiKeyStatus.ACTIVE, cancellationToken);
 
-        if (apiKeyEntry == null || apiKeyEntry.Subsidiary == null)
+        if (apiKeyEntry == null || apiKeyEntry.Project == null)
         {
-            return new SubsidiaryApiKeyValidationResult(false, null, null, null, 0);
+            return new ProjectApiKeyValidationResult(false, null, null, null, 0);
         }
 
-        return new SubsidiaryApiKeyValidationResult(
+        return new ProjectApiKeyValidationResult(
             IsValid: true,
-            SubsidiaryId: apiKeyEntry.SubsidiaryId,
-            SubsidiaryShortCode: apiKeyEntry.Subsidiary.ShortCode,
-            SubsidiaryName: apiKeyEntry.Subsidiary.Name,
+            ProjectId: apiKeyEntry.ProjectId,
+            ProjectShortCode: apiKeyEntry.Project.ShortCode,
+            ProjectName: apiKeyEntry.Project.Name,
             RateLimitPerMinute: apiKeyEntry.RateLimitPerMinute
         );
     }

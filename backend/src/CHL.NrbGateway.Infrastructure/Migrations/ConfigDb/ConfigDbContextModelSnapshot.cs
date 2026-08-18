@@ -62,34 +62,69 @@ namespace CHL.NrbGateway.Infrastructure.Migrations.ConfigDb
                     b.ToTable("admin_users", "config");
                 });
 
-            modelBuilder.Entity("CHL.NrbGateway.Domain.Entities.Config.CacheRetentionPolicy", b =>
+            modelBuilder.Entity("CHL.NrbGateway.Domain.Entities.Config.BillingInvoice", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<string>("DataType")
-                        .IsRequired()
-                        .HasColumnType("text");
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
 
-                    b.Property<string>("FreshnessUnit")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<int>("FreshnessValue")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
+                    b.Property<DateTimeOffset>("GeneratedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<Guid>("UpdatedBy")
+                    b.Property<Guid?>("GeneratedBy")
                         .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("PaidAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateOnly>("PeriodEnd")
+                        .HasColumnType("date");
+
+                    b.Property<DateOnly>("PeriodStart")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("TotalAmount")
+                        .HasColumnType("decimal(10,2)");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("UpdatedBy");
+                    b.HasIndex("CompanyId");
 
-                    b.ToTable("cache_retention_policy", "config");
+                    b.HasIndex("GeneratedBy");
+
+                    b.ToTable("billing_invoices", "config");
+                });
+
+            modelBuilder.Entity("CHL.NrbGateway.Domain.Entities.Config.Company", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ShortCode")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ShortCode")
+                        .IsUnique();
+
+                    b.ToTable("companies", "config");
                 });
 
             modelBuilder.Entity("CHL.NrbGateway.Domain.Entities.Config.ConfigAuditLog", b =>
@@ -128,6 +163,100 @@ namespace CHL.NrbGateway.Infrastructure.Migrations.ConfigDb
                     b.HasIndex("RollbackOfId");
 
                     b.ToTable("config_audit_log", "config");
+                });
+
+            modelBuilder.Entity("CHL.NrbGateway.Domain.Entities.Config.MonthlyUsageReport", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("GeneratedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("PeriodMonth")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("PeriodYear")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("RequestCount")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("TotalCost")
+                        .HasColumnType("decimal(10,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId", "PeriodYear", "PeriodMonth")
+                        .IsUnique();
+
+                    b.ToTable("monthly_usage_reports", "config");
+                });
+
+            modelBuilder.Entity("CHL.NrbGateway.Domain.Entities.Config.NotificationChannel", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ChannelType")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Target")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedBy");
+
+                    b.ToTable("notification_channels", "config");
+                });
+
+            modelBuilder.Entity("CHL.NrbGateway.Domain.Entities.Config.NrbDowntimeIncident", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("DetectedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("EndedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("Notified")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid?>("ResolvedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ResolvedBy");
+
+                    b.ToTable("nrb_downtime_incidents", "config");
                 });
 
             modelBuilder.Entity("CHL.NrbGateway.Domain.Entities.Config.NrbEnvironmentSetting", b =>
@@ -169,10 +298,36 @@ namespace CHL.NrbGateway.Infrastructure.Migrations.ConfigDb
                     b.ToTable("nrb_environment_settings", "config");
                 });
 
-            modelBuilder.Entity("CHL.NrbGateway.Domain.Entities.Config.Subsidiary", b =>
+            modelBuilder.Entity("CHL.NrbGateway.Domain.Entities.Config.NrbHealthCheck", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CheckedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("IsUp")
+                        .HasColumnType("boolean");
+
+                    b.Property<int?>("LatencyMs")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("nrb_health_checks", "config");
+                });
+
+            modelBuilder.Entity("CHL.NrbGateway.Domain.Entities.Config.Project", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
                         .HasColumnType("uuid");
 
                     b.Property<DateTimeOffset>("CreatedAt")
@@ -188,13 +343,15 @@ namespace CHL.NrbGateway.Infrastructure.Migrations.ConfigDb
 
                     b.HasKey("Id");
 
+                    b.HasIndex("CompanyId");
+
                     b.HasIndex("ShortCode")
                         .IsUnique();
 
-                    b.ToTable("subsidiaries", "config");
+                    b.ToTable("projects", "config");
                 });
 
-            modelBuilder.Entity("CHL.NrbGateway.Domain.Entities.Config.SubsidiaryApiKey", b =>
+            modelBuilder.Entity("CHL.NrbGateway.Domain.Entities.Config.ProjectApiKey", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
@@ -214,6 +371,9 @@ namespace CHL.NrbGateway.Infrastructure.Migrations.ConfigDb
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid");
+
                     b.Property<int>("RateLimitPerMinute")
                         .HasColumnType("integer");
 
@@ -224,9 +384,6 @@ namespace CHL.NrbGateway.Infrastructure.Migrations.ConfigDb
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<Guid>("SubsidiaryId")
-                        .HasColumnType("uuid");
-
                     b.HasKey("Id");
 
                     b.HasIndex("CreatedBy");
@@ -234,15 +391,44 @@ namespace CHL.NrbGateway.Infrastructure.Migrations.ConfigDb
                     b.HasIndex("KeyHash")
                         .IsUnique();
 
-                    b.HasIndex("SubsidiaryId");
+                    b.HasIndex("ProjectId");
 
-                    b.ToTable("subsidiary_api_keys", "config");
+                    b.ToTable("project_api_keys", "config");
+                });
+
+            modelBuilder.Entity("CHL.NrbGateway.Domain.Entities.Config.RevalidationBatch", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("InitiatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("TriggerType")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("InitiatedBy");
+
+                    b.ToTable("revalidation_batches", "config");
                 });
 
             modelBuilder.Entity("CHL.NrbGateway.Domain.Entities.Config.VerificationTierSetting", b =>
                 {
                     b.Property<string>("Tier")
                         .HasColumnType("text");
+
+                    b.Property<decimal>("CostPerRequest")
+                        .HasColumnType("decimal(10,2)");
 
                     b.Property<bool>("Enabled")
                         .HasColumnType("boolean");
@@ -260,15 +446,22 @@ namespace CHL.NrbGateway.Infrastructure.Migrations.ConfigDb
                     b.ToTable("verification_tier_settings", "config");
                 });
 
-            modelBuilder.Entity("CHL.NrbGateway.Domain.Entities.Config.CacheRetentionPolicy", b =>
+            modelBuilder.Entity("CHL.NrbGateway.Domain.Entities.Config.BillingInvoice", b =>
                 {
-                    b.HasOne("CHL.NrbGateway.Domain.Entities.Config.AdminUser", "UpdatedByAdmin")
-                        .WithMany("UpdatedCachePolicies")
-                        .HasForeignKey("UpdatedBy")
+                    b.HasOne("CHL.NrbGateway.Domain.Entities.Config.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.Navigation("UpdatedByAdmin");
+                    b.HasOne("CHL.NrbGateway.Domain.Entities.Config.AdminUser", "GeneratedByAdmin")
+                        .WithMany()
+                        .HasForeignKey("GeneratedBy")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Company");
+
+                    b.Navigation("GeneratedByAdmin");
                 });
 
             modelBuilder.Entity("CHL.NrbGateway.Domain.Entities.Config.ConfigAuditLog", b =>
@@ -289,6 +482,27 @@ namespace CHL.NrbGateway.Infrastructure.Migrations.ConfigDb
                     b.Navigation("RollbackOfEntry");
                 });
 
+            modelBuilder.Entity("CHL.NrbGateway.Domain.Entities.Config.NotificationChannel", b =>
+                {
+                    b.HasOne("CHL.NrbGateway.Domain.Entities.Config.AdminUser", "CreatedByAdmin")
+                        .WithMany("CreatedNotificationChannels")
+                        .HasForeignKey("CreatedBy")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("CreatedByAdmin");
+                });
+
+            modelBuilder.Entity("CHL.NrbGateway.Domain.Entities.Config.NrbDowntimeIncident", b =>
+                {
+                    b.HasOne("CHL.NrbGateway.Domain.Entities.Config.AdminUser", "ResolvedByAdmin")
+                        .WithMany()
+                        .HasForeignKey("ResolvedBy")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("ResolvedByAdmin");
+                });
+
             modelBuilder.Entity("CHL.NrbGateway.Domain.Entities.Config.NrbEnvironmentSetting", b =>
                 {
                     b.HasOne("CHL.NrbGateway.Domain.Entities.Config.AdminUser", "UpdatedByAdmin")
@@ -300,7 +514,18 @@ namespace CHL.NrbGateway.Infrastructure.Migrations.ConfigDb
                     b.Navigation("UpdatedByAdmin");
                 });
 
-            modelBuilder.Entity("CHL.NrbGateway.Domain.Entities.Config.SubsidiaryApiKey", b =>
+            modelBuilder.Entity("CHL.NrbGateway.Domain.Entities.Config.Project", b =>
+                {
+                    b.HasOne("CHL.NrbGateway.Domain.Entities.Config.Company", "Company")
+                        .WithMany("Projects")
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Company");
+                });
+
+            modelBuilder.Entity("CHL.NrbGateway.Domain.Entities.Config.ProjectApiKey", b =>
                 {
                     b.HasOne("CHL.NrbGateway.Domain.Entities.Config.AdminUser", "CreatedByAdmin")
                         .WithMany("CreatedApiKeys")
@@ -308,15 +533,25 @@ namespace CHL.NrbGateway.Infrastructure.Migrations.ConfigDb
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("CHL.NrbGateway.Domain.Entities.Config.Subsidiary", "Subsidiary")
+                    b.HasOne("CHL.NrbGateway.Domain.Entities.Config.Project", "Project")
                         .WithMany("ApiKeys")
-                        .HasForeignKey("SubsidiaryId")
+                        .HasForeignKey("ProjectId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
                     b.Navigation("CreatedByAdmin");
 
-                    b.Navigation("Subsidiary");
+                    b.Navigation("Project");
+                });
+
+            modelBuilder.Entity("CHL.NrbGateway.Domain.Entities.Config.RevalidationBatch", b =>
+                {
+                    b.HasOne("CHL.NrbGateway.Domain.Entities.Config.AdminUser", "Initiator")
+                        .WithMany()
+                        .HasForeignKey("InitiatedBy")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Initiator");
                 });
 
             modelBuilder.Entity("CHL.NrbGateway.Domain.Entities.Config.VerificationTierSetting", b =>
@@ -336,14 +571,19 @@ namespace CHL.NrbGateway.Infrastructure.Migrations.ConfigDb
 
                     b.Navigation("CreatedApiKeys");
 
-                    b.Navigation("UpdatedCachePolicies");
+                    b.Navigation("CreatedNotificationChannels");
 
                     b.Navigation("UpdatedEnvSettings");
 
                     b.Navigation("UpdatedTierSettings");
                 });
 
-            modelBuilder.Entity("CHL.NrbGateway.Domain.Entities.Config.Subsidiary", b =>
+            modelBuilder.Entity("CHL.NrbGateway.Domain.Entities.Config.Company", b =>
+                {
+                    b.Navigation("Projects");
+                });
+
+            modelBuilder.Entity("CHL.NrbGateway.Domain.Entities.Config.Project", b =>
                 {
                     b.Navigation("ApiKeys");
                 });
