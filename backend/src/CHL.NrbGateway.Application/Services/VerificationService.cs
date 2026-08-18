@@ -11,11 +11,16 @@ namespace CHL.NrbGateway.Application.Services;
 
 public class VerificationService : IVerificationService
 {
+    private const string MatchStatus = "MATCH";
+    private const string IdentityVerifiedStatus = "IDENTITY_VERIFIED";
+    private const string NotFoundStatus = "NOT FOUND";
+
     private readonly IKycDbContext _kycDbContext;
     private readonly IConfigDbContext _configDbContext;
     private readonly INrbTierAdapter _nrbTierAdapter;
     private readonly IHmacService _hmacService;
     private readonly IEncryptionService _encryptionService;
+    private readonly IBlobStorageService _blobStorageService;
     private readonly IConfiguration _configuration;
     private readonly ILogger<VerificationService> _logger;
 
@@ -25,6 +30,7 @@ public class VerificationService : IVerificationService
         INrbTierAdapter nrbTierAdapter,
         IHmacService hmacService,
         IEncryptionService encryptionService,
+        IBlobStorageService blobStorageService,
         IConfiguration configuration,
         ILogger<VerificationService> logger)
     {
@@ -33,224 +39,153 @@ public class VerificationService : IVerificationService
         _nrbTierAdapter = nrbTierAdapter;
         _hmacService = hmacService;
         _encryptionService = encryptionService;
+        _blobStorageService = blobStorageService;
         _configuration = configuration;
         _logger = logger;
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    // INTERMEDIATE (Tier 3) — Biometric match, cache-first by config
+    // INTERMEDIATE (Tier 3) — Biometric match, match-only response
     // ═══════════════════════════════════════════════════════════════════
 
     public async Task<IntermediateVerificationResultDto> VerifyIntermediateAsync(
-        Guid subsidiaryId,
-        string subsidiaryShortCode,
+        Guid projectId,
+        string projectCode,
         IntermediateVerificationRequestDto request,
         CancellationToken cancellationToken = default)
     {
         var requestTimestamp = DateTimeOffset.UtcNow;
         var pinHash = _hmacService.ComputeHmacSha256(request.NationalId);
 
-        // 1. Verify tier toggle
-        var tierSetting = _configDbContext.VerificationTierSettings
-            .FirstOrDefault(t => t.Tier == NrbTier.INTERMEDIATE);
-        if (tierSetting != null && !tierSetting.Enabled)
-            throw new InvalidOperationException("The INTERMEDIATE NRB verification tier is currently disabled.");
+        EnsureTierEnabled(NrbTier.INTERMEDIATE);
 
-        // 2. Look up existing individual by PIN hash
-        var individual = _kycDbContext.Individuals
-            .FirstOrDefault(i => i.NationalIdHash == pinHash);
+        var subject = GetOrCreateSubject(pinHash, request.NationalId);
 
-        // 3. Cache-first check — controlled by config toggle
-        bool allowCachedMatch = bool.TryParse(
-            _configuration["Verification:Intermediate:AllowCachedMatch"], out var acm) && acm;
+        // Cache-first (binary): a prior successful match serves regardless of age.
+        var cached = _kycDbContext.NrbVerificationEvents
+            .Where(e => e.PinSubmittedHash == pinHash
+                     && e.Tier == NrbTier.INTERMEDIATE
+                     && e.ResponseStatus == MatchStatus)
+            .OrderByDescending(e => e.ResponseTimestamp)
+            .FirstOrDefault();
 
-        if (allowCachedMatch)
+        if (cached != null)
         {
-            var cacheRetention = _configDbContext.CacheRetentionPolicies
-                .FirstOrDefault(c => c.DataType == DataType.VERIFICATION_EVENT);
-            int freshnessHours = cacheRetention?.FreshnessUnit == FreshnessUnit.HOURS
-                ? cacheRetention.FreshnessValue : 24;
-            var cutoff = DateTimeOffset.UtcNow.AddHours(-freshnessHours);
-
-            var cached = _kycDbContext.NrbVerificationEvents
-                .Where(e => e.PinSubmittedHash == pinHash
-                         && e.Tier == NrbTier.INTERMEDIATE
-                         && e.ResponseStatus == "IDENTITY_VERIFIED"
-                         && e.ResponseTimestamp >= cutoff)
-                .OrderByDescending(e => e.ResponseTimestamp)
-                .FirstOrDefault();
-
-            if (cached != null)
-            {
-                _logger.LogInformation("Serving Intermediate from CACHE for PIN {Hash}", pinHash);
-                var gw = new GatewayRequest
-                {
-                    Id = Guid.NewGuid(), SubsidiaryId = subsidiaryId,
-                    IndividualId = individual?.Id, ServedFrom = ServedFrom.CACHE,
-                    NrbVerificationEventId = cached.Id, ResponseStatus = cached.ResponseStatus,
-                    RequestTimestamp = requestTimestamp
-                };
-                _kycDbContext.Add(gw);
-                await _kycDbContext.SaveChangesAsync(cancellationToken);
-                return new IntermediateVerificationResultDto(gw.Id, request.NationalId, true,
-                    cached.ResponseStatus, cached.ConfirmationToken, ServedFrom.CACHE, requestTimestamp);
-            }
-        }
-
-        // 3b. Simulation mode: biometric match simulated against local mirror
-        if (IsSimulationMode())
-        {
-            var simTs = DateTimeOffset.UtcNow;
-            if (individual == null)
-            {
-                _logger.LogWarning("SIMULATION: Intermediate PIN {Hash} not found in local mirror.", pinHash);
-                var simNfGw = PersistGatewayRequest(subsidiaryId, null, ServedFrom.CACHE, null,
-                    "INVALID_PIN", requestTimestamp);
-                await _kycDbContext.SaveChangesAsync(cancellationToken);
-                return new IntermediateVerificationResultDto(simNfGw.Id, request.NationalId, false,
-                    "INVALID_PIN", null, ServedFrom.CACHE, requestTimestamp);
-            }
-
-            _logger.LogInformation("SIMULATION: Intermediate biometric match for PIN {Hash} → MATCH.", pinHash);
-            var simEvt = PersistVerificationEvent(individual.Id, pinHash, NrbTier.INTERMEDIATE, subsidiaryShortCode,
-                requestTimestamp, simTs, "IDENTITY_VERIFIED", $"SIM_CONF_{Guid.NewGuid():N}", null);
-            PersistFieldVerification(individual.Id, "biometric_match", "MATCH",
-                VerificationSource.NRB_INTERMEDIATE, VerificationFieldStatus.CORRECT, simTs);
-            var simGw = PersistGatewayRequest(subsidiaryId, individual.Id, ServedFrom.CACHE, simEvt.Id,
-                "IDENTITY_VERIFIED", requestTimestamp);
+            _logger.LogInformation("Serving Intermediate from CACHE for PIN {Hash}", pinHash);
+            var cachedGw = PersistGatewayRequest(projectId, subject.SubjectId, ServedFrom.CACHE,
+                cached.Id, cached.ResponseStatus, null, requestTimestamp);
             await _kycDbContext.SaveChangesAsync(cancellationToken);
-            return new IntermediateVerificationResultDto(simGw.Id, request.NationalId, true,
-                "IDENTITY_VERIFIED", simEvt.ConfirmationToken, ServedFrom.CACHE, requestTimestamp);
+            return new IntermediateVerificationResultDto(cachedGw.Id, request.NationalId, true,
+                cached.ResponseStatus, cached.ConfirmationToken, ServedFrom.CACHE, requestTimestamp);
         }
 
-        // 4. Cache miss (or disabled) — call NRB live
-        _logger.LogInformation("Calling NRB Intermediate live for PIN {Hash}", pinHash);
-        var nrbResp = await _nrbTierAdapter.VerifyIntermediateAsync(
-            new NrbIntermediateRequestModel(request.NationalId, request.BiometricBlob, subsidiaryShortCode),
-            cancellationToken);
+        NrbIntermediateResponseModel nrbResp;
         var responseTimestamp = DateTimeOffset.UtcNow;
 
-        // 4a. PIN not found in registry → do NOT create a mirror record
-        bool pinNotFound = nrbResp.Status is "INVALID_PIN" or "NOT_FOUND" or "PIN_NOT_FOUND";
-        if (pinNotFound && individual == null)
+        if (IsSimulationMode())
         {
-            _logger.LogWarning("NRB Intermediate: PIN {Hash} not found in registry.", pinHash);
-            var nfGw = PersistGatewayRequest(subsidiaryId, null, ServedFrom.NRB, null,
-                nrbResp.Status, requestTimestamp);
-            await _kycDbContext.SaveChangesAsync(cancellationToken);
-            return new IntermediateVerificationResultDto(nfGw.Id, request.NationalId, false,
-                nrbResp.Status, null, ServedFrom.NRB, requestTimestamp);
+            var hasMirror = _kycDbContext.Individuals.Any(i => i.SubjectId == subject.SubjectId);
+            nrbResp = hasMirror
+                ? new NrbIntermediateResponseModel(true, MatchStatus, $"SIM_CONF_{Guid.NewGuid():N}", null)
+                : new NrbIntermediateResponseModel(false, "INVALID_PIN", null, null);
+        }
+        else
+        {
+            _logger.LogInformation("Calling NRB Intermediate live for PIN {Hash}", pinHash);
+            nrbResp = await _nrbTierAdapter.VerifyIntermediateAsync(
+                new NrbIntermediateRequestModel(request.NationalId, request.BiometricBlob, projectCode),
+                cancellationToken);
+            responseTimestamp = DateTimeOffset.UtcNow;
         }
 
-        // 5. Ensure individual record exists
-        individual ??= await EnsureIndividualAsync(pinHash, request.NationalId, "PENDING_VERIFICATION", "PENDING_VERIFICATION",
-            nrbResp.IsMatch ? RecordStatus.PARTIALLY_VERIFIED : RecordStatus.UNVERIFIED, requestTimestamp, responseTimestamp);
+        bool isMatch = nrbResp.IsMatch;
+        string status = isMatch ? MatchStatus : (string.IsNullOrWhiteSpace(nrbResp.Status) ? "NO_MATCH" : nrbResp.Status);
 
-        // 6. Persist event + field verification + gateway request
-        var evt = PersistVerificationEvent(individual.Id, pinHash, NrbTier.INTERMEDIATE, subsidiaryShortCode,
-            requestTimestamp, responseTimestamp, nrbResp.Status, nrbResp.ConfirmationToken, nrbResp.RawResponsePayload);
-        PersistFieldVerification(individual.Id, "biometric_match", nrbResp.IsMatch ? "MATCH" : "NO_MATCH",
-            VerificationSource.NRB_INTERMEDIATE, nrbResp.IsMatch ? VerificationFieldStatus.CORRECT : VerificationFieldStatus.INCORRECT, responseTimestamp);
-        var gwReq = PersistGatewayRequest(subsidiaryId, individual.Id, ServedFrom.NRB, evt.Id, nrbResp.Status, requestTimestamp);
+        // A successful match with no flag raised → CLEAR; a data-bearing match
+        // (match flag + confirmation token) creates the individuals mirror row.
+        if (isMatch)
+        {
+            var individual = EnsureIndividual(subject.SubjectId, requestTimestamp);
+            individual.MiddlewareStatus = "CLEAR";
+            individual.LastMiddlewareCheckAt = responseTimestamp;
+            individual.UpdatedAt = responseTimestamp;
+        }
+
+        var evt = PersistVerificationEvent(subject.SubjectId, pinHash, request.NationalId, NrbTier.INTERMEDIATE,
+            projectCode, requestTimestamp, responseTimestamp, status, nrbResp.ConfirmationToken,
+            ResponseMode.MATCH_ONLY, TriggerSource.PROJECT_REQUEST, null, nrbResp.RawResponsePayload);
+
+        var gw = PersistGatewayRequest(projectId, subject.SubjectId, ServedFrom.NRB,
+            evt.Id, status, TierCost(NrbTier.INTERMEDIATE), requestTimestamp);
 
         await _kycDbContext.SaveChangesAsync(cancellationToken);
-        return new IntermediateVerificationResultDto(gwReq.Id, request.NationalId, nrbResp.IsMatch,
-            nrbResp.Status, nrbResp.ConfirmationToken, ServedFrom.NRB, requestTimestamp);
+        return new IntermediateVerificationResultDto(gw.Id, request.NationalId, isMatch,
+            status, nrbResp.ConfirmationToken, ServedFrom.NRB, requestTimestamp);
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    // BASIC (Tier 1) — Always-live field reconciliation, no cache bypass
+    // BASIC (Tier 1) — Always-live field reconciliation (a field CHECK)
     // ═══════════════════════════════════════════════════════════════════
 
     public async Task<BasicVerificationResultDto> VerifyBasicAsync(
-        Guid subsidiaryId,
-        string subsidiaryShortCode,
+        Guid projectId,
+        string projectCode,
         BasicVerificationRequestDto request,
         CancellationToken cancellationToken = default)
     {
         var requestTimestamp = DateTimeOffset.UtcNow;
         var pinHash = _hmacService.ComputeHmacSha256(request.IdNumber);
 
-        // 1. Verify tier toggle
-        var tierSetting = _configDbContext.VerificationTierSettings
-            .FirstOrDefault(t => t.Tier == NrbTier.BASIC);
-        if (tierSetting != null && !tierSetting.Enabled)
-            throw new InvalidOperationException("The BASIC NRB verification tier is currently disabled.");
+        EnsureTierEnabled(NrbTier.BASIC);
 
-        // 2. Look up existing individual
-        var individual = _kycDbContext.Individuals
-            .FirstOrDefault(i => i.NationalIdHash == pinHash);
-
-        // 3. Simulation mode: compare against local DB instead of calling NRB
-        bool simulationMode = bool.TryParse(
-            _configuration["Nrb:SimulationMode"], out var sim) && sim;
+        // A subject_id is assigned the moment ANY PIN is submitted.
+        var subject = GetOrCreateSubject(pinHash, request.IdNumber);
 
         NrbBasicResponseModel nrbResp;
         var responseTimestamp = DateTimeOffset.UtcNow;
 
-        if (simulationMode)
+        if (IsSimulationMode())
         {
-            _logger.LogInformation("SIMULATION: Comparing submitted fields against local DB for PIN {Hash}", pinHash);
-            nrbResp = SimulateBasicVerification(request, individual, pinHash);
+            nrbResp = SimulateBasicVerification(request, subject.SubjectId, pinHash);
         }
         else
         {
             _logger.LogInformation("Calling NRB Basic live for PIN {Hash} (always-live tier)", pinHash);
-            var nrbReq = new NrbBasicRequestModel(
-                request.IdNumber, request.Surname, request.FirstName, request.OtherNames,
-                request.Nationality, request.Gender, request.DateOfBirthString,
-                request.DateOfIssueString, request.DateOfExpiryString, request.PlaceOfBirthDistrictName);
-            nrbResp = await _nrbTierAdapter.VerifyBasicAsync(nrbReq, cancellationToken);
+            nrbResp = await _nrbTierAdapter.VerifyBasicAsync(
+                new NrbBasicRequestModel(
+                    request.IdNumber, request.Surname, request.FirstName, request.OtherNames,
+                    request.Nationality, request.Gender, request.DateOfBirthString,
+                    request.DateOfIssueString, request.DateOfExpiryString, request.PlaceOfBirthDistrictName),
+                cancellationToken);
+            responseTimestamp = DateTimeOffset.UtcNow;
         }
 
-        // 4. Handle card status
-        RecordStatus recordStatus;
-        if (NrbBasicCardStatus.IsRejected(nrbResp.CardStatus))
-            recordStatus = RecordStatus.UNVERIFIED;
-        else if (NrbBasicCardStatus.RequiresManualReview(nrbResp.CardStatus))
-            recordStatus = RecordStatus.NEEDS_CORRECTION;
-        else
-            recordStatus = RecordStatus.VERIFIED;
+        bool notFound = string.Equals(nrbResp.CardStatus, NrbBasicCardStatus.NotFound, StringComparison.OrdinalIgnoreCase);
 
-        // 4a. NOT FOUND + no existing record → do NOT create a mirror record
-        if (string.Equals(nrbResp.CardStatus, NrbBasicCardStatus.NotFound, StringComparison.OrdinalIgnoreCase)
-            && individual == null)
+        // Only a data-bearing response creates/updates the individuals mirror row.
+        if (!notFound)
         {
-            _logger.LogWarning("NRB Basic: PIN {Hash} not found in registry.", pinHash);
-            var nfGw = PersistGatewayRequest(subsidiaryId, null, ServedFrom.NRB, null,
-                NrbBasicCardStatus.NotFound, requestTimestamp);
-            await _kycDbContext.SaveChangesAsync(cancellationToken);
-            return new BasicVerificationResultDto(nfGw.Id, request.IdNumber, nrbResp.CardStatus,
-                nrbResp.FieldResults, ServedFrom.NRB, requestTimestamp);
-        }
-
-        // 5. Ensure individual record (create if first time)
-        individual ??= await EnsureIndividualAsync(pinHash, request.IdNumber,
-            request.FirstName, request.Surname, recordStatus, requestTimestamp, responseTimestamp);
-        // Update status if existing record
-        if (individual.RecordStatus != recordStatus)
-        {
-            individual.RecordStatus = recordStatus;
+            var individual = EnsureIndividual(subject.SubjectId, requestTimestamp);
+            individual.CardStatus = nrbResp.CardStatus;
+            individual.LastCardCheckAt = responseTimestamp;
             individual.UpdatedAt = responseTimestamp;
         }
 
-        // 6. Persist per-field verification results (CORRECT/INCORRECT)
+        // Basic is a per-field check, not a data source → field check results.
         foreach (var (fieldName, result) in nrbResp.FieldResults)
         {
-            PersistFieldVerification(individual.Id, fieldName, result,
-                VerificationSource.NRB_BASIC,
-                result == "CORRECT" ? VerificationFieldStatus.CORRECT : VerificationFieldStatus.INCORRECT,
-                responseTimestamp);
+            PersistFieldCheckResult(subject.SubjectId, fieldName, result, NrbTier.BASIC, responseTimestamp);
         }
 
-        // 7. Persist NRB verification event + gateway request
-        var evt = PersistVerificationEvent(individual.Id, pinHash, NrbTier.BASIC, subsidiaryShortCode,
-            requestTimestamp, responseTimestamp, nrbResp.CardStatus, null, null);
-        var gwReq = PersistGatewayRequest(subsidiaryId, individual.Id, ServedFrom.NRB, evt.Id,
-            nrbResp.CardStatus, requestTimestamp);
+        var evt = PersistVerificationEvent(subject.SubjectId, pinHash, request.IdNumber, NrbTier.BASIC,
+            projectCode, requestTimestamp, responseTimestamp, nrbResp.CardStatus, null,
+            ResponseMode.FIELD_CHECK, TriggerSource.PROJECT_REQUEST, null, null);
+
+        var gw = PersistGatewayRequest(projectId, subject.SubjectId, ServedFrom.NRB,
+            evt.Id, nrbResp.CardStatus, TierCost(NrbTier.BASIC), requestTimestamp);
 
         await _kycDbContext.SaveChangesAsync(cancellationToken);
-        return new BasicVerificationResultDto(gwReq.Id, request.IdNumber, nrbResp.CardStatus,
+        return new BasicVerificationResultDto(gw.Id, request.IdNumber, nrbResp.CardStatus,
             nrbResp.FieldResults, ServedFrom.NRB, requestTimestamp);
     }
 
@@ -259,388 +194,189 @@ public class VerificationService : IVerificationService
     // ═══════════════════════════════════════════════════════════════════
 
     public async Task<TextLookupResultDto> TextLookupAsync(
-        Guid subsidiaryId,
-        string subsidiaryShortCode,
+        Guid projectId,
+        string projectCode,
         TextLookupRequestDto request,
         CancellationToken cancellationToken = default)
     {
         var requestTimestamp = DateTimeOffset.UtcNow;
         var pinHash = _hmacService.ComputeHmacSha256(request.IdNumber);
 
-        // 1. Verify tier toggle
-        var tierSetting = _configDbContext.VerificationTierSettings
-            .FirstOrDefault(t => t.Tier == NrbTier.TEXT_LOOKUP);
-        if (tierSetting != null && !tierSetting.Enabled)
-            throw new InvalidOperationException("The TEXT_LOOKUP NRB verification tier is currently disabled.");
+        EnsureTierEnabled(NrbTier.TEXT_LOOKUP);
 
-        // 2. Look up existing individual
-        var individual = _kycDbContext.Individuals
-            .FirstOrDefault(i => i.NationalIdHash == pinHash);
+        var subject = GetOrCreateSubject(pinHash, request.IdNumber);
 
-        // 3. Cache-first: demographics don't change frequently
-        var bioRetention = _configDbContext.CacheRetentionPolicies
-            .FirstOrDefault(c => c.DataType == DataType.BIOGRAPHIC_RECORD);
-        int freshnessHours = bioRetention?.FreshnessUnit == FreshnessUnit.HOURS
-            ? bioRetention.FreshnessValue : 720; // Default 30 days
-        var cutoff = DateTimeOffset.UtcNow.AddHours(-freshnessHours);
-
+        // Cache-first (binary): a prior successful Text Lookup serves regardless of age.
         var cached = _kycDbContext.NrbVerificationEvents
             .Where(e => e.PinSubmittedHash == pinHash
                      && e.Tier == NrbTier.TEXT_LOOKUP
-                     && e.ResponseStatus == "IDENTITY_VERIFIED"
-                     && e.ResponseTimestamp >= cutoff)
+                     && e.ResponseStatus == IdentityVerifiedStatus)
             .OrderByDescending(e => e.ResponseTimestamp)
             .FirstOrDefault();
 
-        if (cached != null && individual != null)
+        if (cached != null)
         {
-            _logger.LogInformation("Serving Text Lookup from CACHE for PIN {Hash}", pinHash);
-            var gw = new GatewayRequest
+            var cachedIndividual = _kycDbContext.Individuals.FirstOrDefault(i => i.SubjectId == cached.SubjectId);
+            if (cachedIndividual != null)
             {
-                Id = Guid.NewGuid(), SubsidiaryId = subsidiaryId,
-                IndividualId = individual.Id, ServedFrom = ServedFrom.CACHE,
-                NrbVerificationEventId = cached.Id, ResponseStatus = cached.ResponseStatus,
-                RequestTimestamp = requestTimestamp
-            };
-            _kycDbContext.Add(gw);
-            await _kycDbContext.SaveChangesAsync(cancellationToken);
-            return new TextLookupResultDto(gw.Id, request.IdNumber,
-                individual.Surname, individual.FirstName, individual.OtherNames,
-                individual.DateOfBirth, individual.Gender.ToString(),
-                individual.PhotoRef, individual.FingerprintRef,
-                ServedFrom.CACHE, true, requestTimestamp);
+                _logger.LogInformation("Serving Text Lookup from CACHE for PIN {Hash}", pinHash);
+                var (photoRef, fingerprintRef) = GetDocumentRefs(cachedIndividual.SubjectId);
+                var cachedGw = PersistGatewayRequest(projectId, subject.SubjectId, ServedFrom.CACHE,
+                    cached.Id, cached.ResponseStatus, null, requestTimestamp);
+                await _kycDbContext.SaveChangesAsync(cancellationToken);
+                return new TextLookupResultDto(cachedGw.Id, request.IdNumber,
+                    cachedIndividual.Surname, cachedIndividual.FirstName, cachedIndividual.OtherNames,
+                    cachedIndividual.DateOfBirth ?? DateOnly.MinValue, cachedIndividual.Gender ?? "",
+                    photoRef, fingerprintRef, ServedFrom.CACHE, true, requestTimestamp);
+            }
         }
 
-        // 3b. Simulation mode: serve from local mirror DB instead of calling NRB
         if (IsSimulationMode())
         {
-            if (individual != null)
+            var simIndividual = _kycDbContext.Individuals.FirstOrDefault(i => i.SubjectId == subject.SubjectId);
+            if (simIndividual != null)
             {
-                _logger.LogInformation("SIMULATION: Serving Text Lookup from local mirror for PIN {Hash}", pinHash);
-                var simGw = PersistGatewayRequest(subsidiaryId, individual.Id, ServedFrom.CACHE, null,
-                    "IDENTITY_VERIFIED", requestTimestamp);
+                var (sPhoto, sFinger) = GetDocumentRefs(simIndividual.SubjectId);
+                var simGw = PersistGatewayRequest(projectId, subject.SubjectId, ServedFrom.CACHE, null,
+                    IdentityVerifiedStatus, null, requestTimestamp);
                 await _kycDbContext.SaveChangesAsync(cancellationToken);
                 return new TextLookupResultDto(simGw.Id, request.IdNumber,
-                    individual.Surname, individual.FirstName, individual.OtherNames,
-                    individual.DateOfBirth, individual.Gender.ToString(),
-                    individual.PhotoRef, individual.FingerprintRef,
-                    ServedFrom.CACHE, true, requestTimestamp);
+                    simIndividual.Surname, simIndividual.FirstName, simIndividual.OtherNames,
+                    simIndividual.DateOfBirth ?? DateOnly.MinValue, simIndividual.Gender ?? "",
+                    sPhoto, sFinger, ServedFrom.CACHE, true, requestTimestamp);
             }
 
             _logger.LogWarning("SIMULATION: PIN {Hash} not found in local mirror.", pinHash);
-            var simNfGw = PersistGatewayRequest(subsidiaryId, null, ServedFrom.CACHE, null,
-                NrbBasicCardStatus.NotFound, requestTimestamp);
+            var simNfGw = PersistGatewayRequest(projectId, subject.SubjectId, ServedFrom.CACHE, null,
+                NotFoundStatus, null, requestTimestamp);
             await _kycDbContext.SaveChangesAsync(cancellationToken);
             return new TextLookupResultDto(simNfGw.Id, request.IdNumber,
-                "", "", null, DateOnly.MinValue, "", null, null,
-                ServedFrom.CACHE, false, requestTimestamp);
+                "", "", null, DateOnly.MinValue, "", null, null, ServedFrom.CACHE, false, requestTimestamp);
         }
 
-        // 4. Cache miss — call NRB live
         _logger.LogInformation("Calling NRB Text Lookup live for PIN {Hash}", pinHash);
         var nrbResp = await _nrbTierAdapter.TextLookupAsync(
             new NrbTextLookupRequestModel(request.IdNumber), cancellationToken);
         var responseTimestamp = DateTimeOffset.UtcNow;
 
-        // 4a. NOT FOUND — do NOT create a mirror record for a non-existent person
         if (!nrbResp.IsFound)
         {
             _logger.LogWarning("NRB Text Lookup: PIN {Hash} not found in registry.", pinHash);
-            var nfGw = PersistGatewayRequest(subsidiaryId, null, ServedFrom.NRB, null,
-                NrbBasicCardStatus.NotFound, requestTimestamp);
+            var nfGw = PersistGatewayRequest(projectId, subject.SubjectId, ServedFrom.NRB, null,
+                NotFoundStatus, TierCost(NrbTier.TEXT_LOOKUP), requestTimestamp);
             await _kycDbContext.SaveChangesAsync(cancellationToken);
             return new TextLookupResultDto(nfGw.Id, request.IdNumber,
-                "", "", null, DateOnly.MinValue, "", null, null,
-                ServedFrom.NRB, false, requestTimestamp);
+                "", "", null, DateOnly.MinValue, "", null, null, ServedFrom.NRB, false, requestTimestamp);
         }
 
-        // 5. Persist blobs → blob storage, store refs only in DB
-        string? photoRef = null, fingerprintRef = null;
-        if (!string.IsNullOrEmpty(nrbResp.PhotoBase64))
-            photoRef = await StoreBlobAsync(pinHash, "photo", nrbResp.PhotoBase64);
-        if (!string.IsNullOrEmpty(nrbResp.FingerprintBase64))
-            fingerprintRef = await StoreBlobAsync(pinHash, "fingerprint", nrbResp.FingerprintBase64);
+        var individual = EnsureIndividual(subject.SubjectId, requestTimestamp);
+        ApplyTextLookupData(individual, nrbResp, responseTimestamp);
 
-        // 6. Ensure individual record with NRB demographic data
-        bool isNewIndividual = individual == null;
-        if (isNewIndividual)
-        {
-            individual = new Individual { Id = Guid.NewGuid(), NationalIdHash = pinHash,
-                NationalIdEncrypted = _encryptionService.Encrypt(request.IdNumber), CreatedAt = requestTimestamp };
-            _kycDbContext.Add(individual);
-        }
-        individual.Surname = nrbResp.Surname;
-        individual.FirstName = nrbResp.FirstName;
-        individual.OtherNames = nrbResp.OtherNames;
-        individual.DateOfBirth = nrbResp.DateOfBirth;
-        individual.Gender = Enum.TryParse<Gender>(nrbResp.Gender, true, out var g) ? g : Gender.MALE;
-        individual.MaritalStatus = nrbResp.MaritalStatus;
-        individual.BirthDistrict = nrbResp.BirthDistrict;
-        individual.ResidentialAddress = nrbResp.ResidentialAddress;
-        individual.IssueDate = nrbResp.IssueDate;
-        individual.ExpiryDate = nrbResp.ExpiryDate;
-        individual.TelephoneNumber = nrbResp.TelephoneNumber;
-        individual.CardStatus = nrbResp.CardStatus;
-        individual.PhotoRef = photoRef ?? individual.PhotoRef;
-        individual.FingerprintRef = fingerprintRef ?? individual.FingerprintRef;
-        individual.FingerPosition = nrbResp.FingerPosition ?? individual.FingerPosition;
-        individual.RecordStatus = RecordStatus.PARTIALLY_VERIFIED;
-        individual.UpdatedAt = responseTimestamp;
+        await PersistDocumentAsync(subject.SubjectId, DocumentType.FACE, DocumentSource.TEXT_LOOKUP,
+            null, null, nrbResp.PhotoBase64, responseTimestamp, cancellationToken);
+        await PersistDocumentAsync(subject.SubjectId, DocumentType.FINGERPRINT, DocumentSource.TEXT_LOOKUP,
+            null, nrbResp.FingerPosition, nrbResp.FingerprintBase64, responseTimestamp, cancellationToken);
 
-        // 7. Persist event + gateway request
-        var evt = PersistVerificationEvent(individual.Id, pinHash, NrbTier.TEXT_LOOKUP, subsidiaryShortCode,
-            requestTimestamp, responseTimestamp, "IDENTITY_VERIFIED", null, null);
-        var gwReq = PersistGatewayRequest(subsidiaryId, individual.Id, ServedFrom.NRB, evt.Id,
-            "IDENTITY_VERIFIED", requestTimestamp);
+        var evt = PersistVerificationEvent(subject.SubjectId, pinHash, request.IdNumber, NrbTier.TEXT_LOOKUP,
+            projectCode, requestTimestamp, responseTimestamp, IdentityVerifiedStatus, null,
+            ResponseMode.DETAILED, TriggerSource.PROJECT_REQUEST, null, null);
+
+        var gw = PersistGatewayRequest(projectId, subject.SubjectId, ServedFrom.NRB,
+            evt.Id, IdentityVerifiedStatus, TierCost(NrbTier.TEXT_LOOKUP), requestTimestamp);
 
         await _kycDbContext.SaveChangesAsync(cancellationToken);
-        return new TextLookupResultDto(gwReq.Id, request.IdNumber,
+
+        var (faceRef, fingerRef) = GetDocumentRefs(subject.SubjectId);
+        return new TextLookupResultDto(gw.Id, request.IdNumber,
             nrbResp.Surname, nrbResp.FirstName, nrbResp.OtherNames,
-            nrbResp.DateOfBirth, nrbResp.Gender, photoRef, fingerprintRef,
+            nrbResp.DateOfBirth, nrbResp.Gender, faceRef, fingerRef,
             ServedFrom.NRB, true, requestTimestamp);
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    // ADVANCED (Tier 4) — Biometric + OTP, two-phase, always live
+    // ADVANCED (Tier 4) — Biometric + OTP, branch on actual response mode
     // ═══════════════════════════════════════════════════════════════════
 
     public async Task<AdvancedVerificationResultDto> VerifyAdvancedAsync(
-        Guid subsidiaryId,
-        string subsidiaryShortCode,
+        Guid projectId,
+        string projectCode,
         AdvancedVerificationRequestDto request,
         CancellationToken cancellationToken = default)
     {
         var requestTimestamp = DateTimeOffset.UtcNow;
         var pinHash = _hmacService.ComputeHmacSha256(request.NationalId);
 
-        // 1. Verify tier toggle
-        var tierSetting = _configDbContext.VerificationTierSettings
-            .FirstOrDefault(t => t.Tier == NrbTier.ADVANCED);
-        if (tierSetting != null && !tierSetting.Enabled)
-            throw new InvalidOperationException("The ADVANCED NRB verification tier is currently disabled.");
+        EnsureTierEnabled(NrbTier.ADVANCED);
 
-        // 2. Look up existing individual
-        var individual = _kycDbContext.Individuals
-            .FirstOrDefault(i => i.NationalIdHash == pinHash);
+        var subject = GetOrCreateSubject(pinHash, request.NationalId);
 
-        // 3. No cache for Advanced — OTP-based, always live
         _logger.LogInformation("Calling NRB Advanced live for PIN {Hash}", pinHash);
 
-        // 3a. Simulation mode: simulate two-phase OTP flow without NRB
-        if (IsSimulationMode())
-        {
-            var simTs = DateTimeOffset.UtcNow;
-            bool simIsPhase1 = string.IsNullOrEmpty(request.Otp);
-
-            if (simIsPhase1)
-            {
-                var p1Gw = PersistGatewayRequest(subsidiaryId, individual?.Id, ServedFrom.CACHE, null,
-                    "OTP_SENT", requestTimestamp);
-                await _kycDbContext.SaveChangesAsync(cancellationToken);
-                return new AdvancedVerificationResultDto(p1Gw.Id, request.NationalId,
-                    true, "088****234", null, NrbAdvancedPhase.OtpSent, requestTimestamp);
-            }
-
-            // Phase 2: complete verification
-            individual ??= await EnsureIndividualAsync(pinHash, request.NationalId,
-                "PENDING_VERIFICATION", "PENDING_VERIFICATION",
-                RecordStatus.VERIFIED, requestTimestamp, simTs);
-            individual.RecordStatus = RecordStatus.VERIFIED;
-            individual.UpdatedAt = simTs;
-
-            var simEvt = PersistVerificationEvent(individual.Id, pinHash, NrbTier.ADVANCED, subsidiaryShortCode,
-                requestTimestamp, simTs, "IDENTITY_VERIFIED", $"SIM_ADV_{Guid.NewGuid():N}", null);
-            PersistFieldVerification(individual.Id, "biometric_otp_match", "MATCH",
-                VerificationSource.NRB_ADVANCED, VerificationFieldStatus.CORRECT, simTs);
-            var p2Gw = PersistGatewayRequest(subsidiaryId, individual.Id, ServedFrom.CACHE, simEvt.Id,
-                "IDENTITY_VERIFIED", requestTimestamp);
-            await _kycDbContext.SaveChangesAsync(cancellationToken);
-            return new AdvancedVerificationResultDto(p2Gw.Id, request.NationalId,
-                true, "088****234", simEvt.ConfirmationToken, NrbAdvancedPhase.VerificationComplete, requestTimestamp);
-        }
-
-        var nrbReq = new NrbAdvancedRequestModel(request.NationalId, request.BiometricBlob, request.Otp);
-        var nrbResp = await _nrbTierAdapter.VerifyAdvancedAsync(nrbReq, cancellationToken);
+        NrbAdvancedResponseModel nrbResp;
         var responseTimestamp = DateTimeOffset.UtcNow;
 
-        bool isPhase1 = nrbResp.Phase == NrbAdvancedPhase.OtpSent;
-
-        // 3a. Failed + no existing record → do NOT create a mirror record
-        if (!nrbResp.IsSuccess && individual == null)
+        if (IsSimulationMode())
         {
-            _logger.LogWarning("NRB Advanced: PIN {Hash} failed OTP/bio and has no local record.", pinHash);
-            var nfGw = PersistGatewayRequest(subsidiaryId, null, ServedFrom.NRB, null,
-                "VERIFICATION_FAILED", requestTimestamp);
+            nrbResp = SimulateAdvanced(request);
+        }
+        else
+        {
+            nrbResp = await _nrbTierAdapter.VerifyAdvancedAsync(
+                new NrbAdvancedRequestModel(request.NationalId, request.BiometricBlob, request.Otp),
+                cancellationToken);
+            responseTimestamp = DateTimeOffset.UtcNow;
+        }
+
+        // Phase 1 (OTP_SENT): log the request, no verification result yet.
+        if (nrbResp.ResponseMode == ResponseMode.OTP_SENT)
+        {
+            var p1Gw = PersistGatewayRequest(projectId, subject.SubjectId, ServedFrom.NRB, null,
+                "OTP_SENT", TierCost(NrbTier.ADVANCED), requestTimestamp);
             await _kycDbContext.SaveChangesAsync(cancellationToken);
-            return new AdvancedVerificationResultDto(nfGw.Id, request.NationalId,
+            return new AdvancedVerificationResultDto(p1Gw.Id, request.NationalId,
+                nrbResp.IsSuccess, nrbResp.MaskedMobile, null, NrbAdvancedPhase.OtpSent, requestTimestamp);
+        }
+
+        if (!nrbResp.IsSuccess)
+        {
+            var failGw = PersistGatewayRequest(projectId, subject.SubjectId, ServedFrom.NRB, null,
+                "VERIFICATION_FAILED", TierCost(NrbTier.ADVANCED), requestTimestamp);
+            await _kycDbContext.SaveChangesAsync(cancellationToken);
+            return new AdvancedVerificationResultDto(failGw.Id, request.NationalId,
                 false, nrbResp.MaskedMobile, null, nrbResp.Phase, requestTimestamp);
         }
 
-        // 4. Ensure individual record
-        individual ??= await EnsureIndividualAsync(pinHash, request.NationalId,
-            "PENDING_VERIFICATION", "PENDING_VERIFICATION",
-            RecordStatus.UNVERIFIED, requestTimestamp, responseTimestamp);
+        // Detailed / direct success: populate the mirror with returned data.
+        var individual = EnsureIndividual(subject.SubjectId, requestTimestamp);
 
-        // 5. Phase 1 (OTP_SENT): log request but do NOT mark as verified
-        if (isPhase1)
+        if (nrbResp.Person != null)
         {
-            var gwReq = PersistGatewayRequest(subsidiaryId, individual.Id, ServedFrom.NRB, null,
-                "OTP_SENT", requestTimestamp);
-            await _kycDbContext.SaveChangesAsync(cancellationToken);
-            return new AdvancedVerificationResultDto(gwReq.Id, request.NationalId,
-                nrbResp.IsSuccess, nrbResp.MaskedMobile, null,
-                NrbAdvancedPhase.OtpSent, requestTimestamp);
+            ApplyAdvancedPersonData(individual, nrbResp.Person, responseTimestamp);
         }
 
-        // 6. Phase 2 (VERIFICATION_COMPLETE): full verification
-        individual.RecordStatus = RecordStatus.VERIFIED;
-        individual.UpdatedAt = responseTimestamp;
+        if (nrbResp.Blobs != null)
+        {
+            foreach (var blob in nrbResp.Blobs)
+            {
+                await PersistAdvancedBlobAsync(subject.SubjectId, blob, responseTimestamp, cancellationToken);
+            }
+        }
 
-        var evt = PersistVerificationEvent(individual.Id, pinHash, NrbTier.ADVANCED, subsidiaryShortCode,
-            requestTimestamp, responseTimestamp, "IDENTITY_VERIFIED", nrbResp.ConfirmationToken, null);
-        PersistFieldVerification(individual.Id, "biometric_otp_match", "MATCH",
-            VerificationSource.NRB_ADVANCED, VerificationFieldStatus.CORRECT, responseTimestamp);
-        var gwReq2 = PersistGatewayRequest(subsidiaryId, individual.Id, ServedFrom.NRB, evt.Id,
-            "IDENTITY_VERIFIED", requestTimestamp);
+        var evt = PersistVerificationEvent(subject.SubjectId, pinHash, request.NationalId, NrbTier.ADVANCED,
+            projectCode, requestTimestamp, responseTimestamp, IdentityVerifiedStatus, nrbResp.ConfirmationToken,
+            ResponseMode.DETAILED, TriggerSource.PROJECT_REQUEST, null, null);
+
+        var gw = PersistGatewayRequest(projectId, subject.SubjectId, ServedFrom.NRB,
+            evt.Id, IdentityVerifiedStatus, TierCost(NrbTier.ADVANCED), requestTimestamp);
 
         await _kycDbContext.SaveChangesAsync(cancellationToken);
-        return new AdvancedVerificationResultDto(gwReq2.Id, request.NationalId,
-            nrbResp.IsSuccess, nrbResp.MaskedMobile, nrbResp.ConfirmationToken,
+        return new AdvancedVerificationResultDto(gw.Id, request.NationalId,
+            true, nrbResp.MaskedMobile, nrbResp.ConfirmationToken,
             NrbAdvancedPhase.VerificationComplete, requestTimestamp);
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    // Shared helpers
-    // ═══════════════════════════════════════════════════════════════════
-
-    private bool IsSimulationMode() =>
-        bool.TryParse(_configuration["Nrb:SimulationMode"], out var sim) && sim;
-
-    private async Task<Individual> EnsureIndividualAsync(string pinHash, string nationalId,
-        string firstName, string surname, RecordStatus status,
-        DateTimeOffset createdAt, DateTimeOffset updatedAt)
-    {
-        var ind = new Individual
-        {
-            Id = Guid.NewGuid(),
-            NationalIdHash = pinHash,
-            NationalIdEncrypted = _encryptionService.Encrypt(nationalId),
-            FirstName = firstName,
-            Surname = surname,
-            RecordStatus = status,
-            CreatedAt = createdAt,
-            UpdatedAt = updatedAt
-        };
-        _kycDbContext.Add(ind);
-        return ind;
-    }
-
-    private NrbVerificationEvent PersistVerificationEvent(Guid individualId, string pinHash,
-        NrbTier tier, string subsidiary, DateTimeOffset reqTs, DateTimeOffset respTs,
-        string status, string? confirmationToken, string? rawPayload)
-    {
-        var evt = new NrbVerificationEvent
-        {
-            Id = Guid.NewGuid(), IndividualId = individualId,
-            PinSubmittedHash = pinHash, Tier = tier,
-            RequestingSubsidiary = subsidiary,
-            RequestTimestamp = reqTs, ResponseTimestamp = respTs,
-            ResponseStatus = status, ConfirmationToken = confirmationToken,
-            RawResponseRef = rawPayload
-        };
-        _kycDbContext.Add(evt);
-        return evt;
-    }
-
-    private void PersistFieldVerification(Guid individualId, string fieldName, string value,
-        VerificationSource source, VerificationFieldStatus status, DateTimeOffset verifiedAt)
-    {
-        _kycDbContext.Add(new IndividualFieldVerification
-        {
-            Id = Guid.NewGuid(), IndividualId = individualId,
-            FieldName = fieldName, Value = value,
-            Source = source, VerificationStatus = status,
-            VerifiedAt = verifiedAt, Superseded = false
-        });
-    }
-
-    private GatewayRequest PersistGatewayRequest(Guid subsidiaryId, Guid? individualId,
-        ServedFrom servedFrom, Guid? eventId, string status, DateTimeOffset timestamp)
-    {
-        var gw = new GatewayRequest
-        {
-            Id = Guid.NewGuid(), SubsidiaryId = subsidiaryId,
-            IndividualId = individualId, ServedFrom = servedFrom,
-            NrbVerificationEventId = eventId, ResponseStatus = status,
-            RequestTimestamp = timestamp
-        };
-        _kycDbContext.Add(gw);
-        return gw;
-    }
-
-    /// <summary>
-    /// Stores a base64 blob and returns a reference pointer.
-    /// TODO: Replace with real blob storage (Azure Blob / S3) in production.
-    /// Currently writes to a local directory for dev purposes only.
-    /// </summary>
-    private async Task<string?> StoreBlobAsync(string pinHash, string blobType, string base64Data)
-    {
-        try
-        {
-            var dir = Path.Combine(Path.GetTempPath(), "chl_nrb_blobs");
-            Directory.CreateDirectory(dir);
-            var fileName = $"{pinHash}_{blobType}_{Guid.NewGuid():N}.bin";
-            var path = Path.Combine(dir, fileName);
-            var bytes = Convert.FromBase64String(base64Data);
-            await File.WriteAllBytesAsync(path, bytes);
-            _logger.LogInformation("Blob stored: {Type} → {Path}", blobType, path);
-            return path; // In production this would be a blob storage URI
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to store {Type} blob for PIN {Hash}", blobType, pinHash);
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Simulation mode: compares submitted Basic verification fields against
-    /// the locally-stored individual record. Returns CORRECT/INCORRECT per field.
-    /// Used when Nrb:SimulationMode = true (no real NRB connection).
-    /// </summary>
-    private NrbBasicResponseModel SimulateBasicVerification(
-        BasicVerificationRequestDto request,
-        Individual? individual,
-        string pinHash)
-    {
-        if (individual == null)
-        {
-            _logger.LogInformation("SIMULATION: No local record for PIN {Hash} — NOT FOUND.", pinHash);
-            return new NrbBasicResponseModel(NrbBasicCardStatus.NotFound,
-                new Dictionary<string, string> { ["IdNumber"] = "INCORRECT" });
-        }
-
-        var f = new Dictionary<string, string>
-        {
-            ["IdNumber"] = request.IdNumber == _encryptionService.Decrypt(individual.NationalIdEncrypted ?? "") ? "CORRECT" : "INCORRECT",
-            ["Surname"] = string.Equals(request.Surname, individual.Surname, StringComparison.OrdinalIgnoreCase) ? "CORRECT" : "INCORRECT",
-            ["FirstName"] = string.Equals(request.FirstName, individual.FirstName, StringComparison.OrdinalIgnoreCase) ? "CORRECT" : "INCORRECT",
-            ["OtherNames"] = string.Equals(request.OtherNames ?? "", individual.OtherNames ?? "", StringComparison.OrdinalIgnoreCase) ? "CORRECT" : "INCORRECT",
-            ["Gender"] = string.Equals(request.Gender, individual.Gender.ToString(), StringComparison.OrdinalIgnoreCase) ? "CORRECT" : "INCORRECT",
-            ["DateOfBirth"] = request.DateOfBirthString == individual.DateOfBirth.ToString("yyyy-MM-dd") ? "CORRECT" : "INCORRECT",
-            ["DateOfIssue"] = "CORRECT",
-            ["DateOfExpiry"] = "CORRECT",
-            ["PlaceOfBirthDistrict"] = string.Equals(request.PlaceOfBirthDistrictName ?? "", individual.BirthDistrict ?? "", StringComparison.OrdinalIgnoreCase) ? "CORRECT" : "INCORRECT"
-        };
-
-        string cardStatus = individual.CardStatus ?? NrbBasicCardStatus.Valid;
-
-        _logger.LogInformation("SIMULATION: {FieldCount} fields compared. Card: {Status}", f.Count, cardStatus);
-        return new NrbBasicResponseModel(cardStatus, f);
-    }
-
-    // ═══════════════════════════════════════════════════════════════════
-    // REVALIDATION — Admin-triggered batch re-check of local mirror vs NRB
+    // REVALIDATION — Admin/scheduled batch re-check of local mirror vs NRB
     // ═══════════════════════════════════════════════════════════════════
 
     public async Task<RevalidationResultDto> RevalidateAllAsync(
@@ -650,36 +386,62 @@ public class VerificationService : IVerificationService
         var startedAt = DateTimeOffset.UtcNow;
         int total = 0, valid = 0, expired = 0, deceased = 0, seeNrb = 0, errors = 0;
 
-        var individuals = _kycDbContext.Individuals.ToList();
-        total = individuals.Count;
+        var batch = new RevalidationBatch
+        {
+            Id = Guid.NewGuid(),
+            TriggerType = RevalidationTriggerType.MANUAL,
+            InitiatedBy = adminId,
+            StartedAt = startedAt
+        };
+        _configDbContext.Add(batch);
+        await _configDbContext.SaveChangesAsync(cancellationToken);
+
+        var subjects = _kycDbContext.IdentityLookups.ToList();
+        total = subjects.Count;
 
         _logger.LogInformation("REVALIDATION: Checking {Count} PINs against NRB Basic tier.", total);
 
-        foreach (var ind in individuals)
+        foreach (var subject in subjects)
         {
             try
             {
-                var nationalId = _encryptionService.Decrypt(ind.NationalIdEncrypted ?? "");
+                var nationalId = _encryptionService.Decrypt(subject.NationalIdEncrypted);
                 if (string.IsNullOrEmpty(nationalId)) { errors++; continue; }
 
+                var individual = _kycDbContext.Individuals.FirstOrDefault(i => i.SubjectId == subject.SubjectId);
+                if (individual == null) continue;
+
                 var nrbReq = new NrbBasicRequestModel(
-                    nationalId, ind.Surname, ind.FirstName, ind.OtherNames,
-                    "", ind.Gender.ToString(), ind.DateOfBirth.ToString("yyyy-MM-dd"),
-                    ind.IssueDate?.ToString("yyyy-MM-dd"), ind.ExpiryDate?.ToString("yyyy-MM-dd"),
-                    ind.BirthDistrict);
+                    nationalId, individual.Surname ?? "", individual.FirstName ?? "", individual.OtherNames,
+                    "", individual.Gender ?? "", individual.DateOfBirth?.ToString("yyyy-MM-dd") ?? "",
+                    individual.IdDateOfIssue?.ToString("yyyy-MM-dd"),
+                    individual.IdDateOfExpiry?.ToString("yyyy-MM-dd"),
+                    individual.BirthDistrict);
 
                 var nrbResp = await _nrbTierAdapter.VerifyBasicAsync(nrbReq, cancellationToken);
 
-                ind.CardStatus = nrbResp.CardStatus;
-                ind.LastRevalidatedAt = DateTimeOffset.UtcNow;
-                ind.UpdatedAt = DateTimeOffset.UtcNow;
+                bool statusChanged = !string.Equals(individual.CardStatus, nrbResp.CardStatus, StringComparison.OrdinalIgnoreCase);
+                individual.CardStatus = nrbResp.CardStatus;
+                individual.LastCardCheckAt = DateTimeOffset.UtcNow;
+                individual.UpdatedAt = DateTimeOffset.UtcNow;
 
-                if (NrbBasicCardStatus.IsRejected(nrbResp.CardStatus))
-                    ind.RecordStatus = RecordStatus.UNVERIFIED;
-                else if (NrbBasicCardStatus.IsStale(nrbResp.CardStatus))
-                    ind.RecordStatus = RecordStatus.NEEDS_CORRECTION;
-                else
-                    ind.RecordStatus = RecordStatus.VERIFIED;
+                bool anyIncorrect = false;
+                foreach (var (fieldName, result) in nrbResp.FieldResults)
+                {
+                    PersistFieldCheckResult(subject.SubjectId, fieldName, result, NrbTier.BASIC, DateTimeOffset.UtcNow);
+                    if (string.Equals(result, "INCORRECT", StringComparison.OrdinalIgnoreCase)) anyIncorrect = true;
+                }
+
+                PersistVerificationEvent(subject.SubjectId, subject.NationalIdHash, nationalId, NrbTier.BASIC,
+                    "REVALIDATION", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, nrbResp.CardStatus, null,
+                    ResponseMode.FIELD_CHECK, TriggerSource.REVALIDATION, batch.Id, null);
+
+                // Refresh actual values only via a data-bearing tier (Text Lookup
+                // or Advanced) — never Intermediate, which returns no biographic data.
+                if (anyIncorrect || statusChanged)
+                {
+                    await RefreshFromDataBearingTierAsync(subject, individual, batch.Id, cancellationToken);
+                }
 
                 switch (nrbResp.CardStatus)
                 {
@@ -692,15 +454,16 @@ public class VerificationService : IVerificationService
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "REVALIDATION: Failed for PIN hash {Hash}", ind.NationalIdHash);
+                _logger.LogError(ex, "REVALIDATION: Failed for PIN hash {Hash}", subject.NationalIdHash);
                 errors++;
             }
         }
 
         await _kycDbContext.SaveChangesAsync(cancellationToken);
-        var completedAt = DateTimeOffset.UtcNow;
 
-        // Audit log in config schema
+        batch.CompletedAt = DateTimeOffset.UtcNow;
+        _configDbContext.Update(batch);
+
         _configDbContext.Add(new ConfigAuditLog
         {
             Id = Guid.NewGuid(),
@@ -709,13 +472,346 @@ public class VerificationService : IVerificationService
             SettingKey = "revalidation.batch",
             OldValue = null,
             NewValue = $"Checked {total}: {valid} valid, {expired} expired, {deceased} deceased, {seeNrb} see NRB, {errors} errors",
-            ChangedAt = completedAt
+            ChangedAt = DateTimeOffset.UtcNow
         });
         await _configDbContext.SaveChangesAsync(cancellationToken);
+
+        var completedAt = DateTimeOffset.UtcNow;
 
         _logger.LogInformation("REVALIDATION complete. Total={Total}, Valid={Valid}, Expired={Expired}, Deceased={Deceased}, SeeNrb={SeeNrb}, Errors={Errors}",
             total, valid, expired, deceased, seeNrb, errors);
 
         return new RevalidationResultDto(total, valid, expired, deceased, seeNrb, errors, startedAt, completedAt);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Shared helpers
+    // ═══════════════════════════════════════════════════════════════════
+
+    private bool IsSimulationMode() =>
+        bool.TryParse(_configuration["Nrb:SimulationMode"], out var sim) && sim;
+
+    private void EnsureTierEnabled(NrbTier tier)
+    {
+        var setting = _configDbContext.VerificationTierSettings.FirstOrDefault(t => t.Tier == tier);
+        if (setting != null && !setting.Enabled)
+            throw new InvalidOperationException($"The {tier} NRB verification tier is currently disabled.");
+    }
+
+    private decimal? TierCost(NrbTier tier) =>
+        _configDbContext.VerificationTierSettings.FirstOrDefault(t => t.Tier == tier)?.CostPerRequest;
+
+    private IdentityLookup GetOrCreateSubject(string pinHash, string rawPin)
+    {
+        var existing = _kycDbContext.IdentityLookups.FirstOrDefault(i => i.NationalIdHash == pinHash);
+        if (existing != null) return existing;
+
+        var subject = new IdentityLookup
+        {
+            SubjectId = Guid.NewGuid(),
+            NationalIdHash = pinHash,
+            NationalIdEncrypted = _encryptionService.Encrypt(rawPin),
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+        _kycDbContext.Add(subject);
+        return subject;
+    }
+
+    private Individual EnsureIndividual(Guid subjectId, DateTimeOffset createdAt)
+    {
+        var existing = _kycDbContext.Individuals.FirstOrDefault(i => i.SubjectId == subjectId);
+        if (existing != null) return existing;
+
+        var individual = new Individual
+        {
+            SubjectId = subjectId,
+            CreatedAt = createdAt,
+            UpdatedAt = createdAt
+        };
+        _kycDbContext.Add(individual);
+        return individual;
+    }
+
+    private NrbVerificationEvent PersistVerificationEvent(
+        Guid? subjectId, string pinHash, string rawPin, NrbTier tier, string projectCode,
+        DateTimeOffset requestTimestamp, DateTimeOffset responseTimestamp, string status,
+        string? confirmationToken, ResponseMode responseMode, TriggerSource triggerSource,
+        Guid? revalidationBatchId, string? rawPayload)
+    {
+        var evt = new NrbVerificationEvent
+        {
+            Id = Guid.NewGuid(),
+            SubjectId = subjectId,
+            PinSubmittedHash = pinHash,
+            PinSubmittedEncrypted = _encryptionService.Encrypt(rawPin),
+            Tier = tier,
+            RequestingProjectCode = projectCode,
+            ResponseMode = responseMode,
+            TriggerSource = triggerSource,
+            RequestTimestamp = requestTimestamp,
+            ResponseTimestamp = responseTimestamp,
+            ResponseStatus = status,
+            ConfirmationToken = confirmationToken,
+            RawResponseRef = rawPayload,
+            RevalidationBatchId = revalidationBatchId
+        };
+        _kycDbContext.Add(evt);
+        return evt;
+    }
+
+    private GatewayRequest PersistGatewayRequest(
+        Guid projectId, Guid? subjectId, ServedFrom servedFrom, Guid? eventId,
+        string status, decimal? cost, DateTimeOffset timestamp)
+    {
+        var gw = new GatewayRequest
+        {
+            Id = Guid.NewGuid(),
+            ProjectId = projectId,
+            SubjectId = subjectId,
+            ServedFrom = servedFrom,
+            NrbVerificationEventId = eventId,
+            ResponseStatus = status,
+            CostIncurred = cost,
+            RequestTimestamp = timestamp
+        };
+        _kycDbContext.Add(gw);
+        return gw;
+    }
+
+    private void PersistFieldCheckResult(Guid? subjectId, string fieldName, string result, NrbTier tier, DateTimeOffset checkedAt)
+    {
+        _kycDbContext.Add(new NrbFieldCheckResult
+        {
+            Id = Guid.NewGuid(),
+            SubjectId = subjectId,
+            FieldName = fieldName,
+            Result = result,
+            Tier = tier,
+            CheckedAt = checkedAt
+        });
+    }
+
+    private void PersistSourceValue(Guid subjectId, string fieldName, string value, FieldSource source, DateTimeOffset observedAt)
+    {
+        var current = _kycDbContext.IndividualSourceValues
+            .Where(v => v.SubjectId == subjectId && v.FieldName == fieldName && v.IsCurrent)
+            .ToList();
+        foreach (var prior in current)
+        {
+            prior.IsCurrent = false;
+            _kycDbContext.Update(prior);
+        }
+
+        _kycDbContext.Add(new IndividualSourceValue
+        {
+            Id = Guid.NewGuid(),
+            SubjectId = subjectId,
+            FieldName = fieldName,
+            Value = value,
+            Source = source,
+            ObservedAt = observedAt,
+            IsCurrent = true
+        });
+    }
+
+    private async Task PersistDocumentAsync(
+        Guid subjectId, DocumentType documentType, DocumentSource source, string? blobFormat,
+        string? fingerPosition, string? base64Data, DateTimeOffset capturedAt, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(base64Data)) return;
+
+        byte[] bytes;
+        try { bytes = Convert.FromBase64String(base64Data); }
+        catch { return; }
+
+        var blobRef = await _blobStorageService.StoreAsync(
+            subjectId.ToString("N"), documentType.ToString().ToLowerInvariant(), blobFormat, bytes, cancellationToken);
+
+        if (blobRef == null)
+        {
+            _logger.LogWarning("Blob storage failed; skipping {DocumentType} document row for subject {SubjectId}",
+                documentType, subjectId);
+            return;
+        }
+
+        _kycDbContext.Add(new IndividualDocument
+        {
+            Id = Guid.NewGuid(),
+            SubjectId = subjectId,
+            DocumentType = documentType,
+            Source = source,
+            BlobFormat = blobFormat,
+            FingerPosition = fingerPosition,
+            BlobRef = blobRef,
+            CapturedAt = capturedAt
+        });
+    }
+
+    private async Task PersistAdvancedBlobAsync(
+        Guid subjectId, NrbAdvancedBlob blob, DateTimeOffset capturedAt, CancellationToken cancellationToken)
+    {
+        var documentType = MapDocumentType(blob.Description);
+        if (documentType == null) return;
+
+        await PersistDocumentAsync(subjectId, documentType.Value, DocumentSource.ADVANCED, blob.BlobType,
+            documentType == DocumentType.FINGERPRINT ? blob.BlobIndex : null, blob.Data, capturedAt, cancellationToken);
+    }
+
+    private static DocumentType? MapDocumentType(string? description)
+    {
+        if (string.IsNullOrWhiteSpace(description)) return null;
+        if (description.Contains("finger", StringComparison.OrdinalIgnoreCase)) return DocumentType.FINGERPRINT;
+        if (description.Contains("sign", StringComparison.OrdinalIgnoreCase)) return DocumentType.SIGNATURE;
+        if (description.Contains("face", StringComparison.OrdinalIgnoreCase)
+            || description.Contains("photo", StringComparison.OrdinalIgnoreCase)
+            || description.Contains("image", StringComparison.OrdinalIgnoreCase)) return DocumentType.FACE;
+        return null;
+    }
+
+    private void ApplyTextLookupData(Individual individual, NrbTextLookupResponseModel resp, DateTimeOffset observedAt)
+    {
+        individual.Surname = resp.Surname;
+        individual.FirstName = resp.FirstName;
+        individual.OtherNames = resp.OtherNames;
+        individual.DateOfBirth = resp.DateOfBirth == DateOnly.MinValue ? null : resp.DateOfBirth;
+        individual.Gender = resp.Gender;
+        individual.CivilStatus = resp.MaritalStatus;
+        individual.BirthDistrict = resp.BirthDistrict;
+        individual.ResidenceAddress = resp.ResidentialAddress;
+        individual.NrbRegisteredPhone = resp.TelephoneNumber;
+        individual.IdDateOfIssue = resp.IssueDate;
+        individual.IdDateOfExpiry = resp.ExpiryDate;
+        individual.CardStatus = resp.CardStatus;
+        individual.LastCardCheckAt = observedAt;
+        individual.UpdatedAt = observedAt;
+
+        PersistSourceValue(individual.SubjectId, "surname", resp.Surname, FieldSource.TEXT_LOOKUP, observedAt);
+        PersistSourceValue(individual.SubjectId, "first_name", resp.FirstName, FieldSource.TEXT_LOOKUP, observedAt);
+        if (!string.IsNullOrWhiteSpace(resp.OtherNames))
+            PersistSourceValue(individual.SubjectId, "other_names", resp.OtherNames, FieldSource.TEXT_LOOKUP, observedAt);
+        if (resp.DateOfBirth != DateOnly.MinValue)
+            PersistSourceValue(individual.SubjectId, "date_of_birth", resp.DateOfBirth.ToString("yyyy-MM-dd"), FieldSource.TEXT_LOOKUP, observedAt);
+        if (!string.IsNullOrWhiteSpace(resp.Gender))
+            PersistSourceValue(individual.SubjectId, "gender", resp.Gender, FieldSource.TEXT_LOOKUP, observedAt);
+        if (!string.IsNullOrWhiteSpace(resp.MaritalStatus))
+            PersistSourceValue(individual.SubjectId, "civil_status", resp.MaritalStatus, FieldSource.TEXT_LOOKUP, observedAt);
+        if (!string.IsNullOrWhiteSpace(resp.BirthDistrict))
+            PersistSourceValue(individual.SubjectId, "birth_district", resp.BirthDistrict, FieldSource.TEXT_LOOKUP, observedAt);
+        if (!string.IsNullOrWhiteSpace(resp.ResidentialAddress))
+            PersistSourceValue(individual.SubjectId, "residence_address", resp.ResidentialAddress, FieldSource.TEXT_LOOKUP, observedAt);
+        if (!string.IsNullOrWhiteSpace(resp.TelephoneNumber))
+            PersistSourceValue(individual.SubjectId, "nrb_registered_phone", resp.TelephoneNumber, FieldSource.TEXT_LOOKUP, observedAt);
+        if (resp.IssueDate.HasValue)
+            PersistSourceValue(individual.SubjectId, "id_date_of_issue", resp.IssueDate.Value.ToString("yyyy-MM-dd"), FieldSource.TEXT_LOOKUP, observedAt);
+        if (resp.ExpiryDate.HasValue)
+            PersistSourceValue(individual.SubjectId, "id_date_of_expiry", resp.ExpiryDate.Value.ToString("yyyy-MM-dd"), FieldSource.TEXT_LOOKUP, observedAt);
+        if (!string.IsNullOrWhiteSpace(resp.CardStatus))
+            PersistSourceValue(individual.SubjectId, "card_status", resp.CardStatus, FieldSource.TEXT_LOOKUP, observedAt);
+    }
+
+    private void ApplyAdvancedPersonData(Individual individual, NrbAdvancedPersonData person, DateTimeOffset observedAt)
+    {
+        if (!string.IsNullOrWhiteSpace(person.Surname)) { individual.Surname = person.Surname; PersistSourceValue(individual.SubjectId, "surname", person.Surname, FieldSource.ADVANCED, observedAt); }
+        if (!string.IsNullOrWhiteSpace(person.FirstName)) { individual.FirstName = person.FirstName; PersistSourceValue(individual.SubjectId, "first_name", person.FirstName, FieldSource.ADVANCED, observedAt); }
+        if (!string.IsNullOrWhiteSpace(person.OtherNames)) { individual.OtherNames = person.OtherNames; PersistSourceValue(individual.SubjectId, "other_names", person.OtherNames, FieldSource.ADVANCED, observedAt); }
+        if (!string.IsNullOrWhiteSpace(person.Gender)) { individual.Gender = person.Gender; PersistSourceValue(individual.SubjectId, "gender", person.Gender, FieldSource.ADVANCED, observedAt); }
+        if (!string.IsNullOrWhiteSpace(person.CivilStatus)) { individual.CivilStatus = person.CivilStatus; PersistSourceValue(individual.SubjectId, "civil_status", person.CivilStatus, FieldSource.ADVANCED, observedAt); }
+        if (!string.IsNullOrWhiteSpace(person.BirthDistrict)) { individual.BirthDistrict = person.BirthDistrict; PersistSourceValue(individual.SubjectId, "birth_district", person.BirthDistrict, FieldSource.ADVANCED, observedAt); }
+        if (!string.IsNullOrWhiteSpace(person.PlaceOfPermanentResidence)) { individual.ResidenceAddress = person.PlaceOfPermanentResidence; PersistSourceValue(individual.SubjectId, "residence_address", person.PlaceOfPermanentResidence, FieldSource.ADVANCED, observedAt); }
+        if (person.DateOfBirth.HasValue) { individual.DateOfBirth = person.DateOfBirth; PersistSourceValue(individual.SubjectId, "date_of_birth", person.DateOfBirth.Value.ToString("yyyy-MM-dd"), FieldSource.ADVANCED, observedAt); }
+        if (person.IssueDate.HasValue) { individual.IdDateOfIssue = person.IssueDate; PersistSourceValue(individual.SubjectId, "id_date_of_issue", person.IssueDate.Value.ToString("yyyy-MM-dd"), FieldSource.ADVANCED, observedAt); }
+        if (person.ExpiryDate.HasValue) { individual.IdDateOfExpiry = person.ExpiryDate; PersistSourceValue(individual.SubjectId, "id_date_of_expiry", person.ExpiryDate.Value.ToString("yyyy-MM-dd"), FieldSource.ADVANCED, observedAt); }
+        if (!string.IsNullOrWhiteSpace(person.CardStatus)) { individual.CardStatus = person.CardStatus; individual.LastCardCheckAt = observedAt; }
+        if (!string.IsNullOrWhiteSpace(person.MiddlewareStatus)) { individual.MiddlewareStatus = person.MiddlewareStatus; individual.LastMiddlewareCheckAt = observedAt; }
+        individual.UpdatedAt = observedAt;
+    }
+
+    private (string? face, string? fingerprint) GetDocumentRefs(Guid subjectId)
+    {
+        var docs = _kycDbContext.IndividualDocuments.Where(d => d.SubjectId == subjectId).ToList();
+        var face = docs.LastOrDefault(d => d.DocumentType == DocumentType.FACE)?.BlobRef;
+        var fingerprint = docs.LastOrDefault(d => d.DocumentType == DocumentType.FINGERPRINT)?.BlobRef;
+        return (face, fingerprint);
+    }
+
+    private async Task RefreshFromDataBearingTierAsync(
+        IdentityLookup subject, Individual individual, Guid batchId, CancellationToken cancellationToken)
+    {
+        var nationalId = _encryptionService.Decrypt(subject.NationalIdEncrypted);
+        if (string.IsNullOrEmpty(nationalId)) return;
+
+        // Text Lookup is the biographic data tier. Advanced requires an
+        // interactive biometric/OTP exchange and is not suitable for an
+        // unattended refresh, so Text Lookup is used when enabled.
+        var textEnabled = _configDbContext.VerificationTierSettings
+            .Any(t => t.Tier == NrbTier.TEXT_LOOKUP && t.Enabled);
+        if (!textEnabled)
+        {
+            _logger.LogWarning("REVALIDATION: no data-bearing tier enabled to refresh subject {SubjectId}", subject.SubjectId);
+            return;
+        }
+
+        var resp = await _nrbTierAdapter.TextLookupAsync(new NrbTextLookupRequestModel(nationalId), cancellationToken);
+        if (!resp.IsFound) return;
+
+        ApplyTextLookupData(individual, resp, DateTimeOffset.UtcNow);
+
+        await PersistDocumentAsync(subject.SubjectId, DocumentType.FACE, DocumentSource.TEXT_LOOKUP,
+            null, null, resp.PhotoBase64, DateTimeOffset.UtcNow, cancellationToken);
+        await PersistDocumentAsync(subject.SubjectId, DocumentType.FINGERPRINT, DocumentSource.TEXT_LOOKUP,
+            null, resp.FingerPosition, resp.FingerprintBase64, DateTimeOffset.UtcNow, cancellationToken);
+
+        PersistVerificationEvent(subject.SubjectId, subject.NationalIdHash, nationalId, NrbTier.TEXT_LOOKUP,
+            "REVALIDATION", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, IdentityVerifiedStatus, null,
+            ResponseMode.DETAILED, TriggerSource.REVALIDATION, batchId, null);
+    }
+
+    /// <summary>
+    /// Simulation mode: compares submitted Basic verification fields against
+    /// the locally-stored individual record.
+    /// </summary>
+    private NrbBasicResponseModel SimulateBasicVerification(
+        BasicVerificationRequestDto request, Guid subjectId, string pinHash)
+    {
+        var individual = _kycDbContext.Individuals.FirstOrDefault(i => i.SubjectId == subjectId);
+        if (individual == null)
+        {
+            _logger.LogInformation("SIMULATION: No local record for PIN {Hash} — NOT FOUND.", pinHash);
+            return new NrbBasicResponseModel(NrbBasicCardStatus.NotFound,
+                new Dictionary<string, string> { ["IdNumber"] = "INCORRECT" });
+        }
+
+        var f = new Dictionary<string, string>
+        {
+            ["Surname"] = string.Equals(request.Surname, individual.Surname, StringComparison.OrdinalIgnoreCase) ? "CORRECT" : "INCORRECT",
+            ["FirstName"] = string.Equals(request.FirstName, individual.FirstName, StringComparison.OrdinalIgnoreCase) ? "CORRECT" : "INCORRECT",
+            ["OtherNames"] = string.Equals(request.OtherNames ?? "", individual.OtherNames ?? "", StringComparison.OrdinalIgnoreCase) ? "CORRECT" : "INCORRECT",
+            ["Gender"] = string.Equals(request.Gender, individual.Gender, StringComparison.OrdinalIgnoreCase) ? "CORRECT" : "INCORRECT",
+            ["DateOfBirth"] = request.DateOfBirthString == individual.DateOfBirth?.ToString("yyyy-MM-dd") ? "CORRECT" : "INCORRECT",
+            ["DateOfIssue"] = "CORRECT",
+            ["DateOfExpiry"] = "CORRECT",
+            ["PlaceOfBirthDistrict"] = string.Equals(request.PlaceOfBirthDistrictName ?? "", individual.BirthDistrict ?? "", StringComparison.OrdinalIgnoreCase) ? "CORRECT" : "INCORRECT"
+        };
+
+        string cardStatus = individual.CardStatus ?? NrbBasicCardStatus.Valid;
+
+        _logger.LogInformation("SIMULATION: {FieldCount} fields compared. Card: {Status}", f.Count, cardStatus);
+        return new NrbBasicResponseModel(cardStatus, f);
+    }
+
+    private NrbAdvancedResponseModel SimulateAdvanced(AdvancedVerificationRequestDto request)
+    {
+        bool phase1 = string.IsNullOrEmpty(request.Otp);
+        if (phase1)
+        {
+            return new NrbAdvancedResponseModel(true, "088****234", null,
+                NrbAdvancedPhase.OtpSent, ResponseMode.OTP_SENT, null, null);
+        }
+
+        return new NrbAdvancedResponseModel(true, "088****234", $"SIM_ADV_{Guid.NewGuid():N}",
+            NrbAdvancedPhase.VerificationComplete, ResponseMode.DETAILED,
+            new NrbAdvancedPersonData("Thindwa", "Cyrus", null, "MALE", null, null, null,
+                new DateOnly(1990, 1, 1), null, null, "VALID", "CLEAR"),
+            null);
     }
 }

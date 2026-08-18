@@ -5,29 +5,29 @@ namespace CHL.NrbGateway.Application.Common.Interfaces;
 public interface IVerificationService
 {
     Task<IntermediateVerificationResultDto> VerifyIntermediateAsync(
-        Guid subsidiaryId,
-        string subsidiaryShortCode,
+        Guid projectId,
+        string projectCode,
         IntermediateVerificationRequestDto request,
         CancellationToken cancellationToken = default
     );
 
     Task<BasicVerificationResultDto> VerifyBasicAsync(
-        Guid subsidiaryId,
-        string subsidiaryShortCode,
+        Guid projectId,
+        string projectCode,
         BasicVerificationRequestDto request,
         CancellationToken cancellationToken = default
     );
 
     Task<TextLookupResultDto> TextLookupAsync(
-        Guid subsidiaryId,
-        string subsidiaryShortCode,
+        Guid projectId,
+        string projectCode,
         TextLookupRequestDto request,
         CancellationToken cancellationToken = default
     );
 
     Task<AdvancedVerificationResultDto> VerifyAdvancedAsync(
-        Guid subsidiaryId,
-        string subsidiaryShortCode,
+        Guid projectId,
+        string projectCode,
         AdvancedVerificationRequestDto request,
         CancellationToken cancellationToken = default
     );

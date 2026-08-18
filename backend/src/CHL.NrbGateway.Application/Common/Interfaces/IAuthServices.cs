@@ -1,20 +1,21 @@
 using CHL.NrbGateway.Domain.Entities.Config;
+using CHL.NrbGateway.Domain.Enums;
 
 namespace CHL.NrbGateway.Application.Common.Interfaces;
 
-public record SubsidiaryApiKeyValidationResult(
+public record ProjectApiKeyValidationResult(
     bool IsValid,
-    Guid? SubsidiaryId,
-    string? SubsidiaryShortCode,
-    string? SubsidiaryName,
+    Guid? ProjectId,
+    string? ProjectShortCode,
+    string? ProjectName,
     int RateLimitPerMinute
 );
 
 public interface IApiKeyValidationService
 {
-    Task<SubsidiaryApiKeyValidationResult> ValidateApiKeyAsync(string apiKey, CancellationToken cancellationToken = default);
+    Task<ProjectApiKeyValidationResult> ValidateApiKeyAsync(string apiKey, CancellationToken cancellationToken = default);
     string HashApiKey(string plaintextKey);
-    (string plaintextKey, string prefix, string hash) GenerateApiKey();
+    (string plaintextKey, string prefix, string hash) GenerateApiKey(ApiKeyEnvironment environment);
 }
 
 public interface IPasswordHasher

@@ -1,11 +1,13 @@
 namespace CHL.NrbGateway.Application.Models;
 
+using CHL.NrbGateway.Domain.Enums;
+
 // ── Intermediate (Tier 3) — Biometric 1:1 match ──────────────────────
 
 public record NrbIntermediateRequestModel(
     string NationalId,
     string BiometricBlob,
-    string SubsidiaryCode
+    string ProjectCode
 );
 
 public record NrbIntermediateResponseModel(
@@ -110,11 +112,41 @@ public record NrbAdvancedRequestModel(
     string? Otp
 );
 
+/// <summary>
+/// Advanced can return either OTP_SENT or a direct IDENTITY_VERIFIED with
+/// full data depending on account permissions — branch on ResponseMode,
+/// never assume OTP is always required.
+/// </summary>
 public record NrbAdvancedResponseModel(
     bool IsSuccess,
     string? MaskedMobile,
     string? ConfirmationToken,
-    string Phase
+    string Phase,
+    ResponseMode ResponseMode,
+    NrbAdvancedPersonData? Person,
+    List<NrbAdvancedBlob>? Blobs
+);
+
+public record NrbAdvancedPersonData(
+    string? Surname,
+    string? FirstName,
+    string? OtherNames,
+    string? Gender,
+    string? CivilStatus,
+    string? BirthDistrict,
+    string? PlaceOfPermanentResidence,
+    DateOnly? DateOfBirth,
+    DateOnly? IssueDate,
+    DateOnly? ExpiryDate,
+    string? CardStatus,
+    string? MiddlewareStatus
+);
+
+public record NrbAdvancedBlob(
+    string? Description,   // e.g. FACE, FINGERPRINT, SIGNATURE
+    string? BlobType,      // e.g. JPG, WSQ
+    string? BlobIndex,     // finger position for fingerprints
+    string? Data           // base64
 );
 
 public static class NrbAdvancedPhase

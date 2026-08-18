@@ -5,9 +5,11 @@ namespace CHL.NrbGateway.Application.Common.Interfaces;
 
 public interface IKycDbContext
 {
+    IQueryable<IdentityLookup> IdentityLookups { get; }
     IQueryable<Individual> Individuals { get; }
-    IQueryable<IndividualIdentification> IndividualIdentifications { get; }
-    IQueryable<IndividualFieldVerification> IndividualFieldVerifications { get; }
+    IQueryable<IndividualSourceValue> IndividualSourceValues { get; }
+    IQueryable<IndividualDocument> IndividualDocuments { get; }
+    IQueryable<NrbFieldCheckResult> NrbFieldCheckResults { get; }
 
     IQueryable<NrbVerificationEvent> NrbVerificationEvents { get; }
     IQueryable<GatewayRequest> GatewayRequests { get; }
@@ -21,12 +23,18 @@ public interface IKycDbContext
 public interface IConfigDbContext
 {
     IQueryable<AdminUser> AdminUsers { get; }
-    IQueryable<Subsidiary> Subsidiaries { get; }
-    IQueryable<SubsidiaryApiKey> SubsidiaryApiKeys { get; }
+    IQueryable<Company> Companies { get; }
+    IQueryable<Project> Projects { get; }
+    IQueryable<ProjectApiKey> ProjectApiKeys { get; }
     IQueryable<VerificationTierSetting> VerificationTierSettings { get; }
     IQueryable<NrbEnvironmentSetting> NrbEnvironmentSettings { get; }
-    IQueryable<CacheRetentionPolicy> CacheRetentionPolicies { get; }
     IQueryable<ConfigAuditLog> ConfigAuditLogs { get; }
+    IQueryable<RevalidationBatch> RevalidationBatches { get; }
+    IQueryable<MonthlyUsageReport> MonthlyUsageReports { get; }
+    IQueryable<BillingInvoice> BillingInvoices { get; }
+    IQueryable<NrbHealthCheck> NrbHealthChecks { get; }
+    IQueryable<NrbDowntimeIncident> NrbDowntimeIncidents { get; }
+    IQueryable<NotificationChannel> NotificationChannels { get; }
 
     void Add<TEntity>(TEntity entity) where TEntity : class;
     void Update<TEntity>(TEntity entity) where TEntity : class;

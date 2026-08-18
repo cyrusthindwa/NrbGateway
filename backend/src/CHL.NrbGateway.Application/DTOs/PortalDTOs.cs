@@ -3,21 +3,35 @@ using CHL.NrbGateway.Domain.Enums;
 
 namespace CHL.NrbGateway.Application.DTOs;
 
-public record SubsidiaryDto(
+public record CompanyDto(
     Guid Id,
     string Name,
     string ShortCode,
     DateTimeOffset CreatedAt
 );
 
-public record CreateSubsidiaryDto(
+public record CreateCompanyDto(
+    [Required] string Name,
+    [Required] string ShortCode
+);
+
+public record ProjectDto(
+    Guid Id,
+    Guid CompanyId,
+    string Name,
+    string ShortCode,
+    DateTimeOffset CreatedAt
+);
+
+public record CreateProjectDto(
+    [Required] Guid CompanyId,
     [Required] string Name,
     [Required] string ShortCode
 );
 
 public record ApiKeyResponseDto(
     Guid Id,
-    Guid SubsidiaryId,
+    Guid ProjectId,
     string PlaintextApiKey,
     string KeyPrefix,
     ApiKeyStatus Status,
@@ -25,9 +39,9 @@ public record ApiKeyResponseDto(
     DateTimeOffset CreatedAt
 );
 
-public record SubsidiaryApiKeySummaryDto(
+public record ProjectApiKeySummaryDto(
     Guid Id,
-    Guid SubsidiaryId,
+    Guid ProjectId,
     string KeyPrefix,
     ApiKeyStatus Status,
     int RateLimitPerMinute,
@@ -38,12 +52,14 @@ public record SubsidiaryApiKeySummaryDto(
 public record TierSettingDto(
     NrbTier Tier,
     bool Enabled,
+    decimal CostPerRequest,
     DateTimeOffset UpdatedAt,
     Guid UpdatedBy
 );
 
 public record UpdateTierSettingDto(
-    bool Enabled
+    bool Enabled,
+    decimal? CostPerRequest
 );
 
 public record EnvironmentSettingDto(
@@ -78,8 +94,8 @@ public record AdminLoginResponseDto(
 );
 
 public record DashboardMetricsDto(
-    int ActiveSubsidiaries,
-    int ActiveSubsidiariesChange,
+    int ActiveProjects,
+    int ActiveProjectsChange,
     int RequestsToday,
     int RequestsTodayChange,
     double CacheHitRate,
@@ -93,14 +109,6 @@ public record RecentChangeDto(
     string Admin,
     string ChangeDetails,
     DateTimeOffset Timestamp
-);
-
-public record CachePolicyDto(
-    int BiographicRecordFreshness,
-    string BiographicRecordFreshnessUnit,
-    int VerificationEventFreshness,
-    string VerificationEventFreshnessUnit,
-    int AuditLogRetentionDays
 );
 
 public record AuditLogEntryDto(
