@@ -11,16 +11,16 @@ namespace CHL.NrbGateway.Api.Portal.Controllers;
 [ApiController]
 [Route("api/v1/portal/[controller]")]
 [Authorize(AuthenticationSchemes = JwtBearerDefaults.AuthenticationScheme)]
-public class SubsidiariesController : ControllerBase
+public class ProjectsController : ControllerBase
 {
     private readonly IConfigDbContext _configDbContext;
     private readonly IApiKeyValidationService _apiKeyValidationService;
-    private readonly ILogger<SubsidiariesController> _logger;
+    private readonly ILogger<ProjectsController> _logger;
 
-    public SubsidiariesController(
+    public ProjectsController(
         IConfigDbContext configDbContext,
         IApiKeyValidationService apiKeyValidationService,
-        ILogger<SubsidiariesController> logger)
+        ILogger<ProjectsController> logger)
     {
         _configDbContext = configDbContext;
         _apiKeyValidationService = apiKeyValidationService;
@@ -28,61 +28,63 @@ public class SubsidiariesController : ControllerBase
     }
 
     [HttpGet]
-    public ActionResult<IEnumerable<SubsidiaryDto>> GetSubsidiaries()
+    public ActionResult<IEnumerable<ProjectDto>> GetProjects()
     {
-        var list = _configDbContext.Subsidiaries
-            .OrderBy(s => s.Name)
-            .Select(s => new SubsidiaryDto(s.Id, s.Name, s.ShortCode, s.CreatedAt))
+        var list = _configDbContext.Projects
+            .OrderBy(p => p.Name)
+            .Select(p => new ProjectDto(p.Id, p.CompanyId, p.Name, p.ShortCode, p.CreatedAt))
             .ToList();
 
         return Ok(list);
     }
 
     [HttpPost]
-    public async Task<ActionResult<SubsidiaryDto>> CreateSubsidiary([FromBody] CreateSubsidiaryDto dto, CancellationToken cancellationToken)
+    public async Task<ActionResult<ProjectDto>> CreateProject([FromBody] CreateProjectDto dto, CancellationToken cancellationToken)
     {
-        var exists = _configDbContext.Subsidiaries
-            .Any(s => s.ShortCode.ToLower() == dto.ShortCode.ToLower());
+        var company = _configDbContext.Companies.FirstOrDefault(c => c.Id == dto.CompanyId);
+        if (company == null)
+            return BadRequest(new { message = $"Company '{dto.CompanyId}' does not exist." });
+
+        var exists = _configDbContext.Projects
+            .Any(p => p.ShortCode.ToLower() == dto.ShortCode.ToLower());
 
         if (exists)
-        {
-            return BadRequest(new { message = $"Subsidiary with short code '{dto.ShortCode}' already exists." });
-        }
+            return BadRequest(new { message = $"Project with short code '{dto.ShortCode}' already exists." });
 
-        var subsidiary = new Subsidiary
+        var project = new Project
         {
             Id = Guid.NewGuid(),
+            CompanyId = dto.CompanyId,
             Name = dto.Name,
             ShortCode = dto.ShortCode.ToUpperInvariant(),
             CreatedAt = DateTimeOffset.UtcNow
         };
 
-        _configDbContext.Add(subsidiary);
+        _configDbContext.Add(project);
         await _configDbContext.SaveChangesAsync(cancellationToken);
 
-        return CreatedAtAction(nameof(GetSubsidiaryById), new { id = subsidiary.Id }, new SubsidiaryDto(subsidiary.Id, subsidiary.Name, subsidiary.ShortCode, subsidiary.CreatedAt));
+        return CreatedAtAction(nameof(GetProjectById), new { id = project.Id },
+            new ProjectDto(project.Id, project.CompanyId, project.Name, project.ShortCode, project.CreatedAt));
     }
 
     [HttpGet("{id:guid}")]
-    public ActionResult<SubsidiaryDto> GetSubsidiaryById(Guid id)
+    public ActionResult<ProjectDto> GetProjectById(Guid id)
     {
-        var subsidiary = _configDbContext.Subsidiaries
-            .FirstOrDefault(s => s.Id == id);
+        var project = _configDbContext.Projects.FirstOrDefault(p => p.Id == id);
+        if (project == null) return NotFound();
 
-        if (subsidiary == null) return NotFound();
-
-        return Ok(new SubsidiaryDto(subsidiary.Id, subsidiary.Name, subsidiary.ShortCode, subsidiary.CreatedAt));
+        return Ok(new ProjectDto(project.Id, project.CompanyId, project.Name, project.ShortCode, project.CreatedAt));
     }
 
     [HttpGet("{id:guid}/api-keys")]
-    public ActionResult<IEnumerable<SubsidiaryApiKeySummaryDto>> GetApiKeys(Guid id)
+    public ActionResult<IEnumerable<ProjectApiKeySummaryDto>> GetApiKeys(Guid id)
     {
-        var keys = _configDbContext.SubsidiaryApiKeys
-            .Where(k => k.SubsidiaryId == id)
+        var keys = _configDbContext.ProjectApiKeys
+            .Where(k => k.ProjectId == id)
             .OrderByDescending(k => k.CreatedAt)
-            .Select(k => new SubsidiaryApiKeySummaryDto(
+            .Select(k => new ProjectApiKeySummaryDto(
                 k.Id,
-                k.SubsidiaryId,
+                k.ProjectId,
                 k.KeyPrefix,
                 k.Status,
                 k.RateLimitPerMinute,
@@ -95,17 +97,21 @@ public class SubsidiariesController : ControllerBase
     }
 
     [HttpPost("{id:guid}/api-keys")]
-    public async Task<ActionResult<ApiKeyResponseDto>> IssueApiKey(Guid id, [FromQuery] int rateLimit = 100, CancellationToken cancellationToken = default)
+    public async Task<ActionResult<ApiKeyResponseDto>> IssueApiKey(
+        Guid id,
+        [FromQuery] int rateLimit = 100,
+        [FromQuery] ApiKeyEnvironment environment = ApiKeyEnvironment.TEST,
+        CancellationToken cancellationToken = default)
     {
-        var subsidiary = _configDbContext.Subsidiaries.FirstOrDefault(s => s.Id == id);
-        if (subsidiary == null) return NotFound(new { message = "Subsidiary not found." });
+        var project = _configDbContext.Projects.FirstOrDefault(p => p.Id == id);
+        if (project == null) return NotFound(new { message = "Project not found." });
 
         var adminUser = _configDbContext.AdminUsers.FirstOrDefault();
         var adminId = adminUser?.Id ?? Guid.Empty;
 
         // Revoke active existing keys upon rotation
-        var activeKeys = _configDbContext.SubsidiaryApiKeys
-            .Where(k => k.SubsidiaryId == id && k.Status == ApiKeyStatus.ACTIVE)
+        var activeKeys = _configDbContext.ProjectApiKeys
+            .Where(k => k.ProjectId == id && k.Status == ApiKeyStatus.ACTIVE)
             .ToList();
 
         foreach (var oldKey in activeKeys)
@@ -116,12 +122,12 @@ public class SubsidiariesController : ControllerBase
         }
 
         // Generate new key
-        var (plaintextKey, prefix, hash) = _apiKeyValidationService.GenerateApiKey();
+        var (plaintextKey, prefix, hash) = _apiKeyValidationService.GenerateApiKey(environment);
 
-        var newKey = new SubsidiaryApiKey
+        var newKey = new ProjectApiKey
         {
             Id = Guid.NewGuid(),
-            SubsidiaryId = id,
+            ProjectId = id,
             KeyHash = hash,
             KeyPrefix = prefix,
             Status = ApiKeyStatus.ACTIVE,
@@ -137,8 +143,8 @@ public class SubsidiariesController : ControllerBase
         {
             Id = Guid.NewGuid(),
             AdminId = adminId,
-            SettingArea = SettingArea.SUBSIDIARY_KEY,
-            SettingKey = $"subsidiary.{subsidiary.ShortCode}.api_key",
+            SettingArea = SettingArea.PROJECT_KEY,
+            SettingKey = $"project.{project.ShortCode}.api_key",
             OldValue = activeKeys.FirstOrDefault()?.KeyPrefix ?? "NONE",
             NewValue = prefix,
             ChangedAt = DateTimeOffset.UtcNow
@@ -148,7 +154,7 @@ public class SubsidiariesController : ControllerBase
 
         return Ok(new ApiKeyResponseDto(
             Id: newKey.Id,
-            SubsidiaryId: id,
+            ProjectId: id,
             PlaintextApiKey: plaintextKey,
             KeyPrefix: prefix,
             Status: newKey.Status,
@@ -160,8 +166,8 @@ public class SubsidiariesController : ControllerBase
     [HttpPost("{id:guid}/api-keys/{keyId:guid}/revoke")]
     public async Task<IActionResult> RevokeApiKey(Guid id, Guid keyId, CancellationToken cancellationToken)
     {
-        var apiKey = _configDbContext.SubsidiaryApiKeys
-            .FirstOrDefault(k => k.Id == keyId && k.SubsidiaryId == id);
+        var apiKey = _configDbContext.ProjectApiKeys
+            .FirstOrDefault(k => k.Id == keyId && k.ProjectId == id);
 
         if (apiKey == null) return NotFound();
 
@@ -176,8 +182,8 @@ public class SubsidiariesController : ControllerBase
             {
                 Id = Guid.NewGuid(),
                 AdminId = adminUser.Id,
-                SettingArea = SettingArea.SUBSIDIARY_KEY,
-                SettingKey = $"subsidiary_api_key.{keyId}.status",
+                SettingArea = SettingArea.PROJECT_KEY,
+                SettingKey = $"project_api_key.{keyId}.status",
                 OldValue = ApiKeyStatus.ACTIVE.ToString(),
                 NewValue = ApiKeyStatus.REVOKED.ToString(),
                 ChangedAt = DateTimeOffset.UtcNow
@@ -189,10 +195,10 @@ public class SubsidiariesController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
-    public async Task<IActionResult> DeleteSubsidiary(Guid id, CancellationToken cancellationToken)
+    public async Task<IActionResult> DeleteProject(Guid id, CancellationToken cancellationToken)
     {
-        var subsidiary = _configDbContext.Subsidiaries.FirstOrDefault(s => s.Id == id);
-        if (subsidiary == null) return NotFound();
+        var project = _configDbContext.Projects.FirstOrDefault(p => p.Id == id);
+        if (project == null) return NotFound();
 
         var adminUser = _configDbContext.AdminUsers.FirstOrDefault();
         if (adminUser != null)
@@ -201,9 +207,9 @@ public class SubsidiariesController : ControllerBase
             {
                 Id = Guid.NewGuid(),
                 AdminId = adminUser.Id,
-                SettingArea = SettingArea.SUBSIDIARY_KEY,
-                SettingKey = $"subsidiary.{subsidiary.ShortCode}.deleted",
-                OldValue = subsidiary.Name,
+                SettingArea = SettingArea.PROJECT_KEY,
+                SettingKey = $"project.{project.ShortCode}.deleted",
+                OldValue = project.Name,
                 NewValue = "DELETED",
                 ChangedAt = DateTimeOffset.UtcNow
             });
@@ -216,11 +222,11 @@ public class SubsidiariesController : ControllerBase
     [HttpPost("{id:guid}/api-keys/{keyId:guid}/rotate")]
     public async Task<ActionResult<ApiKeyResponseDto>> RotateApiKey(Guid id, Guid keyId, CancellationToken cancellationToken)
     {
-        return await IssueApiKey(id, 100, cancellationToken);
+        return await IssueApiKey(id, 100, ApiKeyEnvironment.TEST, cancellationToken);
     }
 
     [HttpGet("{id:guid}/usage")]
-    public ActionResult<IEnumerable<DailyUsageDto>> GetSubsidiaryUsage(Guid id)
+    public ActionResult<IEnumerable<DailyUsageDto>> GetProjectUsage(Guid id)
     {
         var days = new List<DailyUsageDto>();
         var now = DateTimeOffset.UtcNow;

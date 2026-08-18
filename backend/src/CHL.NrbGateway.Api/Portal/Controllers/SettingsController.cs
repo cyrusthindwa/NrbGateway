@@ -28,7 +28,7 @@ public class SettingsController : ControllerBase
     public async Task<ActionResult<IEnumerable<TierSettingDto>>> GetTierSettings(CancellationToken cancellationToken)
     {
         var settings = _configDbContext.VerificationTierSettings
-            .Select(t => new TierSettingDto(t.Tier, t.Enabled, t.UpdatedAt, t.UpdatedBy))
+            .Select(t => new TierSettingDto(t.Tier, t.Enabled, t.CostPerRequest, t.UpdatedAt, t.UpdatedBy))
             .ToList();
 
         // Ensure default records for all 4 tiers exist if empty
@@ -39,10 +39,10 @@ public class SettingsController : ControllerBase
 
             var defaultTiers = new[]
             {
-                new VerificationTierSetting { Tier = NrbTier.BASIC, Enabled = false, UpdatedAt = DateTimeOffset.UtcNow, UpdatedBy = adminId },
-                new VerificationTierSetting { Tier = NrbTier.TEXT_LOOKUP, Enabled = false, UpdatedAt = DateTimeOffset.UtcNow, UpdatedBy = adminId },
-                new VerificationTierSetting { Tier = NrbTier.INTERMEDIATE, Enabled = true, UpdatedAt = DateTimeOffset.UtcNow, UpdatedBy = adminId }, // MVP active
-                new VerificationTierSetting { Tier = NrbTier.ADVANCED, Enabled = false, UpdatedAt = DateTimeOffset.UtcNow, UpdatedBy = adminId }
+                new VerificationTierSetting { Tier = NrbTier.BASIC, Enabled = false, CostPerRequest = 0m, UpdatedAt = DateTimeOffset.UtcNow, UpdatedBy = adminId },
+                new VerificationTierSetting { Tier = NrbTier.TEXT_LOOKUP, Enabled = false, CostPerRequest = 0m, UpdatedAt = DateTimeOffset.UtcNow, UpdatedBy = adminId },
+                new VerificationTierSetting { Tier = NrbTier.INTERMEDIATE, Enabled = true, CostPerRequest = 0m, UpdatedAt = DateTimeOffset.UtcNow, UpdatedBy = adminId }, // MVP active
+                new VerificationTierSetting { Tier = NrbTier.ADVANCED, Enabled = false, CostPerRequest = 0m, UpdatedAt = DateTimeOffset.UtcNow, UpdatedBy = adminId }
             };
 
             foreach (var tier in defaultTiers)
@@ -51,7 +51,7 @@ public class SettingsController : ControllerBase
             }
             await _configDbContext.SaveChangesAsync(cancellationToken);
 
-            settings = defaultTiers.Select(t => new TierSettingDto(t.Tier, t.Enabled, t.UpdatedAt, t.UpdatedBy)).ToList();
+            settings = defaultTiers.Select(t => new TierSettingDto(t.Tier, t.Enabled, t.CostPerRequest, t.UpdatedAt, t.UpdatedBy)).ToList();
         }
 
         return Ok(settings);
@@ -72,6 +72,7 @@ public class SettingsController : ControllerBase
             {
                 Tier = tier,
                 Enabled = dto.Enabled,
+                CostPerRequest = dto.CostPerRequest ?? 0m,
                 UpdatedAt = DateTimeOffset.UtcNow,
                 UpdatedBy = adminId
             };
@@ -81,6 +82,7 @@ public class SettingsController : ControllerBase
         {
             var oldEnabled = setting.Enabled;
             setting.Enabled = dto.Enabled;
+            setting.CostPerRequest = dto.CostPerRequest ?? setting.CostPerRequest;
             setting.UpdatedAt = DateTimeOffset.UtcNow;
             setting.UpdatedBy = adminId;
             _configDbContext.Update(setting);
@@ -99,7 +101,7 @@ public class SettingsController : ControllerBase
 
         await _configDbContext.SaveChangesAsync(cancellationToken);
 
-        return Ok(new TierSettingDto(setting.Tier, setting.Enabled, setting.UpdatedAt, setting.UpdatedBy));
+        return Ok(new TierSettingDto(setting.Tier, setting.Enabled, setting.CostPerRequest, setting.UpdatedAt, setting.UpdatedBy));
     }
 
     [HttpGet("nrb-environment")]
@@ -203,81 +205,5 @@ public class SettingsController : ControllerBase
             envSetting.UpdatedAt,
             envSetting.UpdatedBy
         ));
-    }
-
-    [HttpGet("cache-policy")]
-    public ActionResult<CachePolicyDto> GetCachePolicy()
-    {
-        var bioPolicy = _configDbContext.CacheRetentionPolicies
-            .FirstOrDefault(c => c.DataType == DataType.BIOGRAPHIC_RECORD);
-        var eventPolicy = _configDbContext.CacheRetentionPolicies
-            .FirstOrDefault(c => c.DataType == DataType.VERIFICATION_EVENT);
-
-        return Ok(new CachePolicyDto(
-            BiographicRecordFreshness: bioPolicy?.FreshnessValue ?? 30,
-            BiographicRecordFreshnessUnit: bioPolicy?.FreshnessUnit.ToString() ?? "DAYS",
-            VerificationEventFreshness: eventPolicy?.FreshnessValue ?? 24,
-            VerificationEventFreshnessUnit: eventPolicy?.FreshnessUnit.ToString() ?? "HOURS",
-            AuditLogRetentionDays: 90
-        ));
-    }
-
-    [HttpPut("cache-policy")]
-    public async Task<ActionResult<CachePolicyDto>> UpdateCachePolicy([FromBody] CachePolicyDto dto, CancellationToken cancellationToken)
-    {
-        var adminUser = _configDbContext.AdminUsers.FirstOrDefault();
-        var adminId = adminUser?.Id ?? Guid.Empty;
-
-        var bioPolicy = _configDbContext.CacheRetentionPolicies
-            .FirstOrDefault(c => c.DataType == DataType.BIOGRAPHIC_RECORD);
-        if (bioPolicy == null)
-        {
-            bioPolicy = new CacheRetentionPolicy
-            {
-                Id = Guid.NewGuid(),
-                DataType = DataType.BIOGRAPHIC_RECORD,
-                FreshnessValue = dto.BiographicRecordFreshness,
-                FreshnessUnit = Enum.TryParse<FreshnessUnit>(dto.BiographicRecordFreshnessUnit, true, out var u1) ? u1 : FreshnessUnit.DAYS,
-                UpdatedAt = DateTimeOffset.UtcNow,
-                UpdatedBy = adminId
-            };
-            _configDbContext.Add(bioPolicy);
-        }
-        else
-        {
-            bioPolicy.FreshnessValue = dto.BiographicRecordFreshness;
-            bioPolicy.FreshnessUnit = Enum.TryParse<FreshnessUnit>(dto.BiographicRecordFreshnessUnit, true, out var u1) ? u1 : FreshnessUnit.DAYS;
-            bioPolicy.UpdatedAt = DateTimeOffset.UtcNow;
-            bioPolicy.UpdatedBy = adminId;
-            _configDbContext.Update(bioPolicy);
-        }
-
-        var eventPolicy = _configDbContext.CacheRetentionPolicies
-            .FirstOrDefault(c => c.DataType == DataType.VERIFICATION_EVENT);
-        if (eventPolicy == null)
-        {
-            eventPolicy = new CacheRetentionPolicy
-            {
-                Id = Guid.NewGuid(),
-                DataType = DataType.VERIFICATION_EVENT,
-                FreshnessValue = dto.VerificationEventFreshness,
-                FreshnessUnit = Enum.TryParse<FreshnessUnit>(dto.VerificationEventFreshnessUnit, true, out var u2) ? u2 : FreshnessUnit.HOURS,
-                UpdatedAt = DateTimeOffset.UtcNow,
-                UpdatedBy = adminId
-            };
-            _configDbContext.Add(eventPolicy);
-        }
-        else
-        {
-            eventPolicy.FreshnessValue = dto.VerificationEventFreshness;
-            eventPolicy.FreshnessUnit = Enum.TryParse<FreshnessUnit>(dto.VerificationEventFreshnessUnit, true, out var u2) ? u2 : FreshnessUnit.HOURS;
-            eventPolicy.UpdatedAt = DateTimeOffset.UtcNow;
-            eventPolicy.UpdatedBy = adminId;
-            _configDbContext.Update(eventPolicy);
-        }
-
-        await _configDbContext.SaveChangesAsync(cancellationToken);
-
-        return Ok(dto);
     }
 }

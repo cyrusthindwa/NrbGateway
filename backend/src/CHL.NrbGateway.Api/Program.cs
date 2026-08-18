@@ -83,7 +83,7 @@ builder.Services.AddSwaggerGen(c =>
     // Define security for API Key (Gateway endpoints)
     c.AddSecurityDefinition("ApiKey", new OpenApiSecurityScheme
     {
-        Description = "Subsidiary API Key. Set header: X-Api-Key: chl_live_...",
+        Description = "Project API Key. Set header: X-Api-Key: chl_test_... or chl_live_...",
         Name = "X-Api-Key",
         In = ParameterLocation.Header,
         Type = SecuritySchemeType.ApiKey
@@ -143,6 +143,15 @@ using (var scope = app.Services.CreateScope())
         bool isInMemory = configDb.Database.IsInMemory();
         bool canConnect = !isInMemory && configDb.Database.CanConnect();
 
+        // Apply pending EF migrations on startup so the full docker-compose
+        // stack comes up with a single `docker compose up`.
+        if (!isInMemory && canConnect)
+        {
+            configDb.Database.Migrate();
+            var kycDb = scope.ServiceProvider.GetRequiredService<KycDbContext>();
+            kycDb.Database.Migrate();
+        }
+
         if (isInMemory || canConnect)
         {
             if (!configDb.AdminUsers.Any())
@@ -159,20 +168,24 @@ using (var scope = app.Services.CreateScope())
                 configDb.Add(admin);
                 configDb.SaveChanges();
 
-                var cdhBank = new Subsidiary { Id = Guid.NewGuid(), Name = "CDH Investment Bank", ShortCode = "CDHIB", CreatedAt = DateTimeOffset.UtcNow };
-                var cdhCap = new Subsidiary { Id = Guid.NewGuid(), Name = "Continental Capital", ShortCode = "CDHCAP", CreatedAt = DateTimeOffset.UtcNow };
-                var cam = new Subsidiary { Id = Guid.NewGuid(), Name = "Continental Asset Management", ShortCode = "CAM", CreatedAt = DateTimeOffset.UtcNow };
-                configDb.Add(cdhBank);
-                configDb.Add(cdhCap);
-                configDb.Add(cam);
+                var cdhCompany = new Company { Id = Guid.NewGuid(), Name = "CDH Investment Bank", ShortCode = "CDHIB", CreatedAt = DateTimeOffset.UtcNow };
+                var camCompany = new Company { Id = Guid.NewGuid(), Name = "Continental Asset Management", ShortCode = "CAM", CreatedAt = DateTimeOffset.UtcNow };
+                configDb.Add(cdhCompany);
+                configDb.Add(camCompany);
+                configDb.SaveChanges();
+
+                var cdhProject = new Project { Id = Guid.NewGuid(), CompanyId = cdhCompany.Id, Name = "CDH Investment Bank — Gateway", ShortCode = "CDHIB", CreatedAt = DateTimeOffset.UtcNow };
+                var camProject = new Project { Id = Guid.NewGuid(), CompanyId = camCompany.Id, Name = "CAM — Gateway", ShortCode = "CAM", CreatedAt = DateTimeOffset.UtcNow };
+                configDb.Add(cdhProject);
+                configDb.Add(camProject);
                 configDb.SaveChanges();
 
                 // Dev seed API Key for CDH Investment Bank
-                var devKey = "chl_live_cdhib_dev_key_12345";
-                configDb.Add(new SubsidiaryApiKey
+                var devKey = "chl_test_cdhib_dev_key_12345";
+                configDb.Add(new ProjectApiKey
                 {
                     Id = Guid.NewGuid(),
-                    SubsidiaryId = cdhBank.Id,
+                    ProjectId = cdhProject.Id,
                     KeyHash = apiKeyService.HashApiKey(devKey),
                     KeyPrefix = devKey[..12],
                     Status = ApiKeyStatus.ACTIVE,
@@ -182,13 +195,13 @@ using (var scope = app.Services.CreateScope())
                 });
 
                 // Default tier settings — only INTERMEDIATE is enabled for MVP
-                configDb.Add(new VerificationTierSetting { Tier = NrbTier.BASIC, Enabled = false, UpdatedAt = DateTimeOffset.UtcNow, UpdatedBy = admin.Id });
-                configDb.Add(new VerificationTierSetting { Tier = NrbTier.TEXT_LOOKUP, Enabled = false, UpdatedAt = DateTimeOffset.UtcNow, UpdatedBy = admin.Id });
-                configDb.Add(new VerificationTierSetting { Tier = NrbTier.INTERMEDIATE, Enabled = true, UpdatedAt = DateTimeOffset.UtcNow, UpdatedBy = admin.Id });
-                configDb.Add(new VerificationTierSetting { Tier = NrbTier.ADVANCED, Enabled = false, UpdatedAt = DateTimeOffset.UtcNow, UpdatedBy = admin.Id });
+                configDb.Add(new VerificationTierSetting { Tier = NrbTier.BASIC, Enabled = false, CostPerRequest = 0m, UpdatedAt = DateTimeOffset.UtcNow, UpdatedBy = admin.Id });
+                configDb.Add(new VerificationTierSetting { Tier = NrbTier.TEXT_LOOKUP, Enabled = false, CostPerRequest = 0m, UpdatedAt = DateTimeOffset.UtcNow, UpdatedBy = admin.Id });
+                configDb.Add(new VerificationTierSetting { Tier = NrbTier.INTERMEDIATE, Enabled = true, CostPerRequest = 0m, UpdatedAt = DateTimeOffset.UtcNow, UpdatedBy = admin.Id });
+                configDb.Add(new VerificationTierSetting { Tier = NrbTier.ADVANCED, Enabled = false, CostPerRequest = 0m, UpdatedAt = DateTimeOffset.UtcNow, UpdatedBy = admin.Id });
                 configDb.SaveChanges();
 
-                Log.Information("Dev seed complete. CDHIB test API key: {Key}", devKey);
+                Log.Information("Dev seed complete. CDHIB test API key prefix: {Prefix}", devKey[..12]);
             }
         }
     }

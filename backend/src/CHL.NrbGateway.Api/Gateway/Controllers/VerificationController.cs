@@ -22,13 +22,13 @@ public class VerificationController : ControllerBase
         _logger = logger;
     }
 
-    private (Guid subsidiaryId, string shortCode) ExtractSubsidiaryContext()
+    private (Guid projectId, string shortCode) ExtractProjectContext()
     {
-        var idClaim = User.FindFirst("SubsidiaryId")?.Value;
-        var codeClaim = User.FindFirst("SubsidiaryShortCode")?.Value;
-        if (!Guid.TryParse(idClaim, out var subId))
-            throw new UnauthorizedAccessException("Invalid subsidiary context in API key authentication.");
-        return (subId, codeClaim ?? "SUB");
+        var idClaim = User.FindFirst("ProjectId")?.Value;
+        var codeClaim = User.FindFirst("ProjectShortCode")?.Value;
+        if (!Guid.TryParse(idClaim, out var projectId))
+            throw new UnauthorizedAccessException("Invalid project context in API key authentication.");
+        return (projectId, codeClaim ?? "PRJ");
     }
 
     // ── Intermediate (Tier 3) ────────────────────────────────────────
@@ -43,8 +43,8 @@ public class VerificationController : ControllerBase
     {
         try
         {
-            var (subId, code) = ExtractSubsidiaryContext();
-            return Ok(await _verificationService.VerifyIntermediateAsync(subId, code, request, cancellationToken));
+            var (projectId, code) = ExtractProjectContext();
+            return Ok(await _verificationService.VerifyIntermediateAsync(projectId, code, request, cancellationToken));
         }
         catch (UnauthorizedAccessException) { return Unauthorized(); }
         catch (InvalidOperationException ex) { return UnprocessableEntity(new { message = ex.Message }); }
@@ -64,8 +64,8 @@ public class VerificationController : ControllerBase
     {
         try
         {
-            var (subId, code) = ExtractSubsidiaryContext();
-            var result = await _verificationService.VerifyBasicAsync(subId, code, request, cancellationToken);
+            var (projectId, code) = ExtractProjectContext();
+            var result = await _verificationService.VerifyBasicAsync(projectId, code, request, cancellationToken);
             if (string.Equals(result.CardStatus, "NOT FOUND", StringComparison.OrdinalIgnoreCase))
                 return NotFound(new { message = "National ID not found in NRB registry.", cardStatus = result.CardStatus });
             return Ok(result);
@@ -88,8 +88,8 @@ public class VerificationController : ControllerBase
     {
         try
         {
-            var (subId, code) = ExtractSubsidiaryContext();
-            var result = await _verificationService.TextLookupAsync(subId, code, request, cancellationToken);
+            var (projectId, code) = ExtractProjectContext();
+            var result = await _verificationService.TextLookupAsync(projectId, code, request, cancellationToken);
             if (!result.Found)
                 return NotFound(new { message = "National ID not found in NRB registry." });
             return Ok(result);
@@ -111,8 +111,8 @@ public class VerificationController : ControllerBase
     {
         try
         {
-            var (subId, code) = ExtractSubsidiaryContext();
-            return Ok(await _verificationService.VerifyAdvancedAsync(subId, code, request, cancellationToken));
+            var (projectId, code) = ExtractProjectContext();
+            return Ok(await _verificationService.VerifyAdvancedAsync(projectId, code, request, cancellationToken));
         }
         catch (UnauthorizedAccessException) { return Unauthorized(); }
         catch (InvalidOperationException ex) { return UnprocessableEntity(new { message = ex.Message }); }

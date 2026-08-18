@@ -41,17 +41,17 @@ public class ApiKeyAuthenticationHandler : AuthenticationHandler<ApiKeyAuthentic
 
         var validationResult = await _apiKeyValidationService.ValidateApiKeyAsync(providedApiKey, Context.RequestAborted);
 
-        if (!validationResult.IsValid || !validationResult.SubsidiaryId.HasValue)
+        if (!validationResult.IsValid || !validationResult.ProjectId.HasValue)
         {
             return AuthenticateResult.Fail("Invalid or revoked API key.");
         }
 
         var claims = new[]
         {
-            new Claim("SubsidiaryId", validationResult.SubsidiaryId.Value.ToString()),
-            new Claim("SubsidiaryShortCode", validationResult.SubsidiaryShortCode ?? string.Empty),
-            new Claim("SubsidiaryName", validationResult.SubsidiaryName ?? string.Empty),
-            new Claim(ClaimTypes.Role, "Subsidiary")
+            new Claim("ProjectId", validationResult.ProjectId.Value.ToString()),
+            new Claim("ProjectShortCode", validationResult.ProjectShortCode ?? string.Empty),
+            new Claim("ProjectName", validationResult.ProjectName ?? string.Empty),
+            new Claim(ClaimTypes.Role, "Project")
         };
 
         var identity = new ClaimsIdentity(claims, ApiKeyAuthenticationOptions.DefaultScheme);

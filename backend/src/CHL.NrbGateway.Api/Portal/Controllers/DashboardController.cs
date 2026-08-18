@@ -23,7 +23,7 @@ public class DashboardController : ControllerBase
     [HttpGet("metrics")]
     public ActionResult<DashboardMetricsDto> GetMetrics()
     {
-        var activeSubsidiaries = _configDbContext.Subsidiaries.Count();
+        var activeProjects = _configDbContext.Projects.Count();
         
         var today = DateTimeOffset.UtcNow.Date;
         var requestsToday = _kycDbContext.GatewayRequests
@@ -34,8 +34,8 @@ public class DashboardController : ControllerBase
         double cacheHitRate = totalServed > 0 ? Math.Round((double)cacheServed / totalServed * 100, 1) : 85.0;
 
         return Ok(new DashboardMetricsDto(
-            ActiveSubsidiaries: activeSubsidiaries > 0 ? activeSubsidiaries : 3,
-            ActiveSubsidiariesChange: 0,
+            ActiveProjects: activeProjects > 0 ? activeProjects : 3,
+            ActiveProjectsChange: 0,
             RequestsToday: requestsToday,
             RequestsTodayChange: 12,
             CacheHitRate: cacheHitRate,
