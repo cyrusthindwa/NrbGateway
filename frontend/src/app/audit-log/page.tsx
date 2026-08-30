@@ -2,42 +2,62 @@
 
 import { useEffect, useState, useCallback } from "react";
 import PortalLayout from "@/components/layout/PortalLayout";
-import { Card, PageHeader, Button, Badge } from "@/components/ui/common";
+import { Card, PageHeader, Button } from "@/components/ui/common";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRouter } from "next/navigation";
 import { apiService } from "@/services/api";
-import { ChevronLeft, ChevronRight, Download } from "lucide-react";
-import type { AuditLogEntry } from "@/types";
+import { ChevronLeft, ChevronRight, Download, RotateCcw, AlertCircle } from "lucide-react";
+import type { AuditLogEntry, AdminUser } from "@/types";
+import { formatDateTime } from "@/lib/format";
+
+const ACTION_TYPES = [
+  { value: "TIER_TOGGLE", label: "Tier Toggle" },
+  { value: "RATE_LIMIT", label: "Rate Limit" },
+  { value: "NRB_ENVIRONMENT", label: "NRB Environment" },
+  { value: "PROJECT_KEY", label: "Project Key" },
+  { value: "ADMIN_USER", label: "Admin User" },
+  { value: "COMPANY", label: "Company" },
+  { value: "PROJECT", label: "Project" },
+  { value: "NOTIFICATION_CHANNEL", label: "Notification Channel" },
+  { value: "AUDIT_RETENTION", label: "Audit Retention" },
+];
+
+const ROLLBACKABLE = new Set(["TIER_TOGGLE", "RATE_LIMIT", "NRB_ENVIRONMENT"]);
 
 export default function AuditLogPage() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const router = useRouter();
   const [logs, setLogs] = useState<AuditLogEntry[]>([]);
+  const [admins, setAdmins] = useState<AdminUser[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
-  const [filters, setFilters] = useState({
-    dateRange: "last7",
-    admin: "all",
-    actionType: "all",
-  });
+  const [error, setError] = useState("");
+  const [adminFilter, setAdminFilter] = useState("all");
+  const [actionTypeFilter, setActionTypeFilter] = useState("all");
 
   const pageSize = 10;
 
   const loadLogs = useCallback(async () => {
     setIsLoading(true);
+    setError("");
     try {
-      const result = await apiService.getAuditLogs({ page, pageSize });
+      const result = await apiService.getAuditLogs({
+        page,
+        pageSize,
+        admin: adminFilter === "all" ? undefined : adminFilter,
+        actionType: actionTypeFilter === "all" ? undefined : actionTypeFilter,
+      });
       setLogs(result.data);
       setTotal(result.total);
       setTotalPages(result.totalPages);
     } catch (err) {
-      console.error("Failed to load audit logs:", err);
+      setError(err instanceof Error ? err.message : "Failed to load audit logs.");
     } finally {
       setIsLoading(false);
     }
-  }, [page]);
+  }, [page, adminFilter, actionTypeFilter]);
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -46,8 +66,53 @@ export default function AuditLogPage() {
     }
     if (isAuthenticated) {
       loadLogs();
+      apiService
+        .getAdminUsers({ page: 1, pageSize: 100 })
+        .then((r) => setAdmins(r.data))
+        .catch(() => {});
     }
   }, [isAuthenticated, authLoading, loadLogs]);
+
+  async function handleRollback(id: string) {
+    if (!confirm("Roll back this change to its previous value?")) return;
+    setError("");
+    try {
+      await apiService.rollbackAuditEntry(id);
+      loadLogs();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Rollback failed.");
+    }
+  }
+
+  async function handleExportCsv() {
+    setError("");
+    try {
+      const result = await apiService.getAuditLogs({
+        page: 1,
+        pageSize: 1000,
+        admin: adminFilter === "all" ? undefined : adminFilter,
+        actionType: actionTypeFilter === "all" ? undefined : actionTypeFilter,
+      });
+      const esc = (v: string) => `"${(v ?? "").replace(/"/g, '""')}"`;
+      const lines = [
+        ["Timestamp (UTC)", "Admin", "Setting Changed", "Old Value", "New Value"].join(","),
+        ...result.data.map((r) =>
+          [r.timestamp, r.admin, r.settingChanged, r.oldValue, r.newValue].map(esc).join(",")
+        ),
+      ];
+      const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "audit-log.csv";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Export failed.");
+    }
+  }
 
   if (authLoading) {
     return (
@@ -65,11 +130,18 @@ export default function AuditLogPage() {
         title="System Audit Log"
         description="Immutable record of all administrative configuration changes."
       >
-        <Button variant="primary">
+        <Button variant="primary" onClick={handleExportCsv}>
           <Download size={16} />
           Export CSV
         </Button>
       </PageHeader>
+
+      {error && (
+        <div className="mb-4 flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+          <AlertCircle size={16} />
+          <span>{error}</span>
+        </div>
+      )}
 
       {/* Filters */}
       <Card className="p-5 mb-6">
@@ -77,36 +149,22 @@ export default function AuditLogPage() {
         <div className="flex items-end gap-4 flex-wrap">
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">
-              Date Range
-            </label>
-            <select
-              value={filters.dateRange}
-              onChange={(e) =>
-                setFilters((f) => ({ ...f, dateRange: e.target.value }))
-              }
-              className="border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white"
-            >
-              <option value="last7">Last 7 Days</option>
-              <option value="last30">Last 30 Days</option>
-              <option value="last90">Last 90 Days</option>
-              <option value="custom">Custom Range</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">
               Administrator
             </label>
             <select
-              value={filters.admin}
-              onChange={(e) =>
-                setFilters((f) => ({ ...f, admin: e.target.value }))
-              }
+              value={adminFilter}
+              onChange={(e) => {
+                setAdminFilter(e.target.value);
+                setPage(1);
+              }}
               className="border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white"
             >
               <option value="all">All Administrators</option>
-              <option value="sysadmin">sysadmin@nrb.gov</option>
-              <option value="sec_ops">sec_ops@nrb.gov</option>
+              {admins.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -115,23 +173,21 @@ export default function AuditLogPage() {
               Action Type
             </label>
             <select
-              value={filters.actionType}
-              onChange={(e) =>
-                setFilters((f) => ({ ...f, actionType: e.target.value }))
-              }
+              value={actionTypeFilter}
+              onChange={(e) => {
+                setActionTypeFilter(e.target.value);
+                setPage(1);
+              }}
               className="border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white"
             >
               <option value="all">All Actions</option>
-              <option value="UPDATE">Update</option>
-              <option value="CREATE">Create</option>
-              <option value="REVOKE">Revoke</option>
-              <option value="DELETE">Delete</option>
+              {ACTION_TYPES.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
             </select>
           </div>
-
-          <Button variant="primary" onClick={loadLogs}>
-            Apply Filters
-          </Button>
         </div>
       </Card>
 
@@ -156,18 +212,21 @@ export default function AuditLogPage() {
                 <th className="text-left px-5 py-3 text-xs font-medium text-slate-500 uppercase">
                   New Value
                 </th>
+                <th className="text-right px-5 py-3 text-xs font-medium text-slate-500 uppercase">
+                  Actions
+                </th>
               </tr>
             </thead>
             <tbody>
               {isLoading ? (
                 <tr>
-                  <td colSpan={5} className="text-center py-12 text-slate-500">
+                  <td colSpan={6} className="text-center py-12 text-slate-500">
                     Loading...
                   </td>
                 </tr>
               ) : logs.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="text-center py-12 text-slate-500">
+                  <td colSpan={6} className="text-center py-12 text-slate-500">
                     No audit log entries found.
                   </td>
                 </tr>
@@ -178,7 +237,7 @@ export default function AuditLogPage() {
                     className="border-b border-slate-100 hover:bg-slate-50"
                   >
                     <td className="px-5 py-3 text-slate-600 font-mono text-xs">
-                      {log.timestamp}
+                      {formatDateTime(log.timestamp)}
                     </td>
                     <td className="px-5 py-3 font-medium text-navy-800">
                       {log.admin}
@@ -195,6 +254,18 @@ export default function AuditLogPage() {
                       <span className="text-green-600 bg-green-50 px-2 py-0.5 rounded text-xs">
                         {log.newValue}
                       </span>
+                    </td>
+                    <td className="px-5 py-3 text-right">
+                      {ROLLBACKABLE.has(log.actionType) && (
+                        <Button
+                          variant="ghost"
+                          className="text-xs"
+                          onClick={() => handleRollback(log.id)}
+                        >
+                          <RotateCcw size={14} />
+                          Rollback
+                        </Button>
+                      )}
                     </td>
                   </tr>
                 ))

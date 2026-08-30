@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import { apiService } from "@/services/api";
 import { Plus, Trash2, ExternalLink } from "lucide-react";
 import type { Company, Project } from "@/types";
+import { formatDateTime } from "@/lib/format";
 
 export default function ProjectsPage() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
@@ -192,7 +193,7 @@ export default function ProjectsPage() {
               <StatusDot status="ACTIVE" />
             </div>
             <p className="text-xs text-slate-400 mb-4">
-              Created {project.createdAt}
+              Created {formatDateTime(project.createdAt)}
             </p>
             <div className="flex items-center gap-2">
               <Button

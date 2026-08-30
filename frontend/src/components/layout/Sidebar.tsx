@@ -8,16 +8,28 @@ import {
   ShieldCheck,
   ScrollText,
   Users,
+  UserPlus,
   LogOut,
   Key,
+  Building2,
+  Bell,
+  CreditCard,
+  RefreshCw,
+  Activity,
 } from "lucide-react";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/companies", label: "Companies", icon: Building2 },
   { href: "/projects", label: "Projects", icon: Key },
   { href: "/verification-tiers", label: "Verification Tiers", icon: ShieldCheck },
   { href: "/audit-log", label: "Audit Log", icon: ScrollText },
   { href: "/admin-users", label: "Admin Users", icon: Users },
+  { href: "/manual-portal-users", label: "Manual Portal Users", icon: UserPlus },
+  { href: "/notification-channels", label: "Notification Channels", icon: Bell },
+  { href: "/billing", label: "Billing", icon: CreditCard },
+  { href: "/revalidation", label: "Revalidation", icon: RefreshCw },
+  { href: "/uptime", label: "NRB Uptime", icon: Activity },
 ];
 
 export default function Sidebar() {

@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import type { LoginResponse } from "@/types";
+import type { LoginChallenge, LoginResponse } from "@/types";
 import { apiService } from "@/services/api";
 
 interface AuthContextType {
@@ -10,7 +10,9 @@ interface AuthContextType {
   token: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  requestOtp: (email: string, password: string) => Promise<LoginChallenge>;
+  verifyOtp: (adminId: string, code: string) => Promise<void>;
+  resendOtp: (adminId: string) => Promise<LoginChallenge>;
   logout: () => void;
 }
 
@@ -32,14 +34,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setIsLoading(false);
   }, []);
 
-  const login = useCallback(async (email: string, password: string) => {
-    const response = await apiService.login({ email, password });
+  const requestOtp = useCallback(async (email: string, password: string) => {
+    return await apiService.login({ email, password });
+  }, []);
+
+  const verifyOtp = useCallback(async (adminId: string, code: string) => {
+    const response = await apiService.verifyOtp({ adminId, code });
     setToken(response.token);
     setUser(response);
     localStorage.setItem("nrb_token", response.token);
     localStorage.setItem("nrb_user", JSON.stringify(response));
     router.push("/dashboard");
   }, [router]);
+
+  const resendOtp = useCallback(async (adminId: string) => {
+    return await apiService.resendOtp({ adminId });
+  }, []);
 
   const logout = useCallback(() => {
     setToken(null);
@@ -56,7 +66,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         token,
         isAuthenticated: !!token,
         isLoading,
-        login,
+        requestOtp,
+        verifyOtp,
+        resendOtp,
         logout,
       }}
     >

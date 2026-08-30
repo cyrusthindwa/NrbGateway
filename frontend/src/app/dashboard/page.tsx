@@ -14,6 +14,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import type { DashboardMetrics, RecentChange, TierSetting, RevalidationResult } from "@/types";
+import { formatDateTime } from "@/lib/format";
 
 export default function DashboardPage() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
@@ -25,16 +26,18 @@ export default function DashboardPage() {
   const [tierLoading, setTierLoading] = useState<Record<string, boolean>>({});
   const [revalidating, setRevalidating] = useState(false);
   const [revalidationResult, setRevalidationResult] = useState<RevalidationResult | null>(null);
+  const [revalidationError, setRevalidationError] = useState<string | null>(null);
 
   async function handleRevalidate() {
     if (revalidating) return;
     setRevalidating(true);
     setRevalidationResult(null);
+    setRevalidationError(null);
     try {
       const result = await apiService.revalidateAll();
       setRevalidationResult(result);
     } catch (err) {
-      console.error("Revalidation failed:", err);
+      setRevalidationError(err instanceof Error ? err.message : "Revalidation failed.");
     } finally {
       setRevalidating(false);
     }
@@ -116,6 +119,8 @@ export default function DashboardPage() {
     return String(n);
   };
 
+  const formatDelta = (n: number) => `${n >= 0 ? "↑" : "↓"} ${Math.abs(n)}`;
+
   return (
     <PortalLayout>
       <PageHeader title="Console">
@@ -143,33 +148,47 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {/* Revalidation error banner */}
+      {revalidationError && (
+        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+          <p className="text-sm font-semibold text-red-800 mb-1">
+            Re-validation failed
+          </p>
+          <p className="text-xs text-red-700">{revalidationError}</p>
+        </div>
+      )}
+
       {/* Metrics Cards */}
       <div className="grid grid-cols-4 gap-5 mb-8">
         <StatCard
           label="ACTIVE PROJECTS"
           value={metrics?.activeProjects ?? "-"}
-          subValue={`↑ ${metrics?.activeProjectsChange ?? 0} this month`}
+          subValue={`${formatDelta(metrics?.activeProjectsChange ?? 0)} vs last month`}
           icon={<Building2 size={20} />}
           color="green"
         />
         <StatCard
           label="REQUESTS TODAY"
           value={metrics ? formatNumber(metrics.requestsToday) : "-"}
-          subValue={`↑ ${metrics?.requestsTodayChange ?? 0}%`}
+          subValue={`${formatDelta(metrics?.requestsTodayChange ?? 0)} vs yesterday`}
           icon={<Activity size={20} />}
           color="blue"
         />
         <StatCard
           label="CACHE HIT RATE"
-          value={`${metrics?.cacheHitRate ?? 0}%`}
+          value={metrics?.cacheHitRate != null ? `${metrics.cacheHitRate}%` : "—"}
           subValue={`Target: ${metrics?.cacheHitRateTarget ?? 0}%`}
           icon={<Zap size={20} />}
           color="orange"
         />
         <StatCard
           label="NRB LINK STATUS"
-          value={`${metrics?.nrbLinkStatus ?? "-"} (${metrics?.nrbLinkLatency ?? 0}ms)`}
-          subValue={`Latency: ${metrics?.nrbLinkLatency ?? 0}ms`}
+          value={metrics?.nrbLinkStatus ?? "—"}
+          subValue={
+            metrics?.nrbLinkLatency != null
+              ? `Latency: ${metrics.nrbLinkLatency}ms`
+              : "No health checks recorded"
+          }
           icon={<Wifi size={20} />}
         />
       </div>
@@ -211,7 +230,7 @@ export default function DashboardPage() {
                       {change.changeDetails}
                     </td>
                     <td className="px-5 py-3 text-slate-500 text-right">
-                      {change.timestamp}
+                      {formatDateTime(change.timestamp)}
                     </td>
                   </tr>
                 ))}

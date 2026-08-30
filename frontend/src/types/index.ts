@@ -8,6 +8,16 @@ export interface AdminUser {
   createdAt: string;
 }
 
+export interface ManualPortalUser {
+  id: string;
+  email: string;
+  companyId: string;
+  companyName: string;
+  status: "ACTIVE" | "DISABLED";
+  createdAt: string;
+  lastLoginAt: string | null;
+}
+
 export interface Company {
   id: string;
   name: string;
@@ -68,10 +78,11 @@ export interface DashboardMetrics {
   activeProjectsChange: number;
   requestsToday: number;
   requestsTodayChange: number;
-  cacheHitRate: number;
+  cacheHitRate: number | null;
   cacheHitRateTarget: number;
-  nrbLinkStatus: "Healthy" | "Degraded" | "Down";
-  nrbLinkLatency: number;
+  nrbLinkStatus: "Healthy" | "Degraded" | "Down" | "Not yet monitored";
+  nrbLinkLatency: number | null;
+  nrbLastCheckedAt: string | null;
 }
 
 export interface RecentChange {
@@ -98,6 +109,12 @@ export interface LoginResponse {
   email: string;
 }
 
+export interface LoginChallenge {
+  adminId: string;
+  expiresInSeconds: number;
+  message: string;
+}
+
 export interface PaginatedResponse<T> {
   data: T[];
   total: number;
@@ -115,4 +132,110 @@ export interface RevalidationResult {
   errors: number;
   startedAt: string;
   completedAt: string;
+}
+
+export type NotificationChannelType = "EMAIL" | "SMS" | "WEBHOOK";
+
+export interface NotificationChannel {
+  id: string;
+  channelType: NotificationChannelType;
+  target: string;
+  enabled: boolean;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface CreateAdminUserRequest {
+  name: string;
+  email: string;
+  password: string;
+}
+
+export interface UpdateAdminUserRequest {
+  name: string;
+  email: string;
+}
+
+export interface ResetPasswordRequest {
+  adminId: string;
+  token: string;
+  newPassword: string;
+}
+
+export interface RevalidationBatch {
+  id: string;
+  triggerType: "MANUAL" | "SCHEDULED";
+  initiatedBy: string | null;
+  initiatedByName: string | null;
+  startedAt: string;
+  completedAt: string | null;
+  totalCount: number;
+  validCount: number;
+  expiredCount: number;
+  deceasedCount: number;
+  seeNrbCount: number;
+  errorCount: number;
+}
+
+export interface NrbDowntimeIncident {
+  id: string;
+  startedAt: string;
+  endedAt: string | null;
+  detectedBy: string;
+  notified: boolean;
+  resolvedBy: string | null;
+  resolvedByName: string | null;
+}
+
+export interface NrbStatus {
+  status: "Healthy" | "Down" | "Not yet monitored";
+  isUp: boolean | null;
+  latencyMs: number | null;
+  errorMessage: string | null;
+  lastCheckedAt: string | null;
+  openIncident: NrbDowntimeIncident | null;
+}
+
+export interface ProjectUsageToday {
+  projectId: string;
+  projectName: string;
+  projectShortCode: string;
+  totalCost: number;
+  totalRequests: number;
+}
+
+export interface BillingToday {
+  companyId: string;
+  companyName: string;
+  companyShortCode: string;
+  companyTotalCost: number;
+  companyTotalRequests: number;
+  projects: ProjectUsageToday[];
+}
+
+export interface MonthlyUsageReport {
+  id: string;
+  projectId: string;
+  projectName: string;
+  projectShortCode: string;
+  companyId: string;
+  companyName: string;
+  periodYear: number;
+  periodMonth: number;
+  requestCount: number;
+  totalCost: number;
+  generatedAt: string;
+}
+
+export interface BillingInvoice {
+  id: string;
+  companyId: string;
+  companyName: string;
+  companyShortCode: string;
+  periodStart: string;
+  periodEnd: string;
+  totalAmount: number;
+  status: "PENDING" | "INVOICED" | "PAID";
+  generatedAt: string;
+  paidAt: string | null;
 }

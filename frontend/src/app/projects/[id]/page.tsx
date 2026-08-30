@@ -8,6 +8,7 @@ import { useRouter, useParams } from "next/navigation";
 import { apiService } from "@/services/api";
 import { ArrowLeft, Key, RotateCw, Ban, Save } from "lucide-react";
 import type { Project, ProjectApiKey, DailyUsage } from "@/types";
+import { formatDateTime } from "@/lib/format";
 import {
   BarChart,
   Bar,
@@ -26,7 +27,8 @@ export default function ProjectDetailPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [apiKeys, setApiKeys] = useState<ProjectApiKey[]>([]);
   const [usage, setUsage] = useState<DailyUsage[]>([]);
-  const [rateLimit, setRateLimit] = useState(1200);
+  const [rateLimits, setRateLimits] = useState<Record<string, number>>({});
+  const [savingRateLimit, setSavingRateLimit] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [newKeyPlaintext, setNewKeyPlaintext] = useState<string | null>(null);
 
@@ -51,9 +53,11 @@ export default function ProjectDetailPage() {
       setProject(proj);
       setApiKeys(keys);
       setUsage(u);
-      if (keys.length > 0) {
-        setRateLimit(keys[0].rateLimitPerMinute);
-      }
+      const limits: Record<string, number> = {};
+      keys.forEach((k) => {
+        limits[k.id] = k.rateLimitPerMinute;
+      });
+      setRateLimits(limits);
     } catch (err) {
       console.error("Failed to load project data:", err);
     } finally {
@@ -73,7 +77,8 @@ export default function ProjectDetailPage() {
 
   async function handleRotateKey(keyId: string) {
     try {
-      await apiService.rotateApiKey(id, keyId);
+      const rotated = await apiService.rotateApiKey(id, keyId);
+      setNewKeyPlaintext(rotated.plaintextApiKey || null);
       loadData();
     } catch {
       // handled
@@ -90,8 +95,18 @@ export default function ProjectDetailPage() {
     }
   }
 
-  async function handleSaveRateLimit() {
-    // API call would go here
+  async function handleSaveRateLimit(keyId: string) {
+    const value = rateLimits[keyId];
+    if (value == null || value <= 0) return;
+    setSavingRateLimit(keyId);
+    try {
+      await apiService.updateRateLimit(id, keyId, value);
+      loadData();
+    } catch {
+      // handled
+    } finally {
+      setSavingRateLimit(null);
+    }
   }
 
   if (authLoading || isLoading) {
@@ -185,29 +200,33 @@ export default function ProjectDetailPage() {
                     {key.keyPrefix.length > 0 ? key.keyPrefix.slice(-4) : "****"}
                   </p>
                   <div className="flex items-center gap-4 text-xs text-slate-500 mb-3">
-                    <span>CREATED: {key.createdAt}</span>
+                    <span>CREATED: {formatDateTime(key.createdAt)}</span>
                     {key.rotatedAtRevokedAt && (
-                      <span>LAST ROTATED: {key.rotatedAtRevokedAt}</span>
+                      <span>LAST ROTATED: {formatDateTime(key.rotatedAtRevokedAt)}</span>
                     )}
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="secondary"
-                      onClick={() => handleRotateKey(key.id)}
-                      className="text-xs"
-                    >
-                      <RotateCw size={14} />
-                      Rotate Key
-                    </Button>
-                    <Button
-                      variant="danger"
-                      onClick={() => handleRevokeKey(key.id)}
-                      className="text-xs"
-                    >
-                      <Ban size={14} />
-                      Revoke Access
-                    </Button>
-                  </div>
+                  {key.status === "ACTIVE" ? (
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="secondary"
+                        onClick={() => handleRotateKey(key.id)}
+                        className="text-xs"
+                      >
+                        <RotateCw size={14} />
+                        Rotate Key
+                      </Button>
+                      <Button
+                        variant="danger"
+                        onClick={() => handleRevokeKey(key.id)}
+                        className="text-xs"
+                      >
+                        <Ban size={14} />
+                        Revoke Access
+                      </Button>
+                    </div>
+                  ) : (
+                    <Badge variant="danger">REVOKED</Badge>
+                  )}
                 </div>
 
                 {/* Rate Limits */}
@@ -222,9 +241,12 @@ export default function ProjectDetailPage() {
                       </label>
                       <input
                         type="number"
-                        value={rateLimit}
+                        value={rateLimits[key.id] ?? 0}
                         onChange={(e) =>
-                          setRateLimit(Number(e.target.value))
+                          setRateLimits((p) => ({
+                            ...p,
+                            [key.id]: Number(e.target.value),
+                          }))
                         }
                         className="w-24 border border-slate-300 rounded-lg px-3 py-2 text-sm"
                       />
@@ -233,11 +255,12 @@ export default function ProjectDetailPage() {
                   </div>
                   <Button
                     variant="primary"
-                    onClick={handleSaveRateLimit}
+                    onClick={() => handleSaveRateLimit(key.id)}
                     className="mt-3"
+                    disabled={savingRateLimit === key.id}
                   >
                     <Save size={14} />
-                    Save Limits
+                    {savingRateLimit === key.id ? "Saving..." : "Save Limits"}
                   </Button>
                 </div>
               </div>

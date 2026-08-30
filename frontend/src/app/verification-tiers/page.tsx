@@ -45,9 +45,12 @@ export default function VerificationTiersPage() {
   const router = useRouter();
   const [tiers, setTiers] = useState<TierSetting[]>([]);
   const [environment, setEnvironment] = useState<EnvironmentSetting | null>(null);
-  const [envMode, setEnvMode] = useState<"TEST" | "PRODUCTION">("PRODUCTION");
+  const [envMode, setEnvMode] = useState<"TEST" | "PRODUCTION" | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [copied, setCopied] = useState<string | null>(null);
+  const [costDrafts, setCostDrafts] = useState<Record<string, string>>({});
+  const [costSaving, setCostSaving] = useState<Record<string, boolean>>({});
+  const [pageError, setPageError] = useState("");
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -68,6 +71,11 @@ export default function VerificationTiersPage() {
       setTiers(t);
       setEnvironment(e);
       setEnvMode(e.environment);
+      const drafts: Record<string, string> = {};
+      t.forEach((x) => {
+        drafts[x.tier] = String(x.costPerRequest ?? 0);
+      });
+      setCostDrafts(drafts);
     } catch (err) {
       console.error("Failed to load tier settings:", err);
     } finally {
@@ -97,11 +105,34 @@ export default function VerificationTiersPage() {
   }
 
   async function handleEnvChange(mode: "TEST" | "PRODUCTION") {
+    const previous = envMode;
     setEnvMode(mode);
     try {
       await apiService.updateEnvironmentSetting({ environment: mode });
     } catch {
-      // Silently handle
+      // Revert to the last confirmed value if the update fails.
+      setEnvMode(previous);
+    }
+  }
+
+  async function handleCostSave(tierKey: string) {
+    const tier = tiers.find((t) => t.tier === tierKey);
+    if (!tier) return;
+    const raw = costDrafts[tierKey];
+    const value = Number(raw);
+    if (raw === "" || Number.isNaN(value) || value < 0) {
+      setPageError("Cost must be a non-negative number.");
+      return;
+    }
+    setPageError("");
+    setCostSaving((p) => ({ ...p, [tierKey]: true }));
+    try {
+      const updated = await apiService.updateTierSetting(tierKey, tier.enabled, value);
+      setTiers((prev) => prev.map((t) => (t.tier === tierKey ? updated : t)));
+    } catch (err) {
+      setPageError(err instanceof Error ? err.message : "Failed to save cost.");
+    } finally {
+      setCostSaving((p) => ({ ...p, [tierKey]: false }));
     }
   }
 
@@ -132,6 +163,12 @@ export default function VerificationTiersPage() {
         title="Verification Tiers"
         description="Manage and configure the active verification endpoints for the gateway. Changes made here apply across all configured API keys unless overridden at the project level."
       />
+
+      {pageError && (
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+          {pageError}
+        </div>
+      )}
 
       {/* Tier Cards */}
       <div className="grid grid-cols-2 gap-5 mb-8">
@@ -171,6 +208,31 @@ export default function VerificationTiersPage() {
                   onChange={() => handleTierToggle(tier.tier, tier.enabled)}
                 />
               </div>
+              <div className="mt-4 pt-4 border-t border-slate-100 flex items-end gap-3">
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">
+                    COST PER REQUEST (MWK)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={costDrafts[config.key] ?? "0"}
+                    onChange={(e) =>
+                      setCostDrafts((p) => ({ ...p, [config.key]: e.target.value }))
+                    }
+                    className="w-32 border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                  />
+                </div>
+                <Button
+                  variant="secondary"
+                  className="text-xs"
+                  disabled={costSaving[config.key]}
+                  onClick={() => handleCostSave(config.key)}
+                >
+                  {costSaving[config.key] ? "Saving..." : "Save Cost"}
+                </Button>
+              </div>
             </Card>
           );
         })}
@@ -202,7 +264,7 @@ export default function VerificationTiersPage() {
                 : "bg-slate-100 text-slate-500 hover:bg-slate-200"
             }`}
           >
-            🔘 PROD
+            PROD
           </button>
         </div>
 
@@ -249,34 +311,6 @@ export default function VerificationTiersPage() {
               >
                 <Copy size={16} />
                 {copied === "url" && (
-                  <span className="text-xs text-green-600 ml-1">Copied!</span>
-                )}
-              </button>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              SOCKET CONNECTION
-            </label>
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                readOnly
-                value="wss://stream.prod.nrb.gov/events"
-                className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-600"
-              />
-              <button
-                onClick={() =>
-                  copyToClipboard(
-                    "wss://stream.prod.nrb.gov/events",
-                    "socket"
-                  )
-                }
-                className="p-2 hover:bg-slate-100 rounded-lg text-slate-500"
-              >
-                <Copy size={16} />
-                {copied === "socket" && (
                   <span className="text-xs text-green-600 ml-1">Copied!</span>
                 )}
               </button>
