@@ -15,7 +15,18 @@ namespace CHL.NrbGateway.Infrastructure.Services;
 public class BCryptPasswordHasher : IPasswordHasher
 {
     public string HashPassword(string password) => BCrypt.Net.BCrypt.HashPassword(password);
-    public bool VerifyPassword(string password, string hash) => BCrypt.Net.BCrypt.Verify(password, hash);
+    public bool VerifyPassword(string password, string hash)
+    {
+        if (string.IsNullOrWhiteSpace(password) || string.IsNullOrWhiteSpace(hash)) return false;
+        try
+        {
+            return BCrypt.Net.BCrypt.Verify(password, hash);
+        }
+        catch
+        {
+            return false;
+        }
+    }
 }
 
 public class JwtTokenService : IJwtTokenService
@@ -39,6 +50,31 @@ public class JwtTokenService : IJwtTokenService
             new Claim(JwtRegisteredClaimNames.Email, adminUser.Email),
             new Claim(ClaimTypes.Name, adminUser.Name),
             new Claim(ClaimTypes.Role, "CHL_ICT_Admin")
+        };
+
+        var token = new JwtSecurityToken(
+            issuer: _configuration["Jwt:Issuer"] ?? "CHL_NRB_Gateway",
+            audience: _configuration["Jwt:Audience"] ?? "CHL_Portal_Admins",
+            claims: claims,
+            expires: DateTime.UtcNow.AddHours(8),
+            signingCredentials: creds
+        );
+
+        return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+
+    public string GenerateManualUserToken(CHL.NrbGateway.Domain.Entities.ManualPortal.ManualUser manualUser)
+    {
+        var secret = _configuration["Jwt:SecretKey"] ?? "DEFAULT_DEV_JWT_SECRET_KEY_REPLACE_WITH_SECRETS_STORE_IN_PRODUCTION_MIN_256_BITS";
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
+        var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+
+        var claims = new[]
+        {
+            new Claim(JwtRegisteredClaimNames.Sub, manualUser.Id.ToString()),
+            new Claim(JwtRegisteredClaimNames.Email, manualUser.Email),
+            new Claim("CompanyId", manualUser.CompanyId.ToString()),
+            new Claim(ClaimTypes.Role, "Manual_Portal_User")
         };
 
         var token = new JwtSecurityToken(

@@ -17,6 +17,8 @@ public static class DependencyInjection
         var kycConnectionString = configuration.GetConnectionString("Kyc");
         services.AddDbContext<KycDbContext>(options =>
         {
+            options.ConfigureWarnings(warnings =>
+                warnings.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
             if (!string.IsNullOrEmpty(kycConnectionString))
             {
                 options.UseNpgsql(kycConnectionString, npgsqlOptions =>
@@ -35,6 +37,8 @@ public static class DependencyInjection
         var configConnectionString = configuration.GetConnectionString("Config");
         services.AddDbContext<ConfigDbContext>(options =>
         {
+            options.ConfigureWarnings(warnings =>
+                warnings.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
             if (!string.IsNullOrEmpty(configConnectionString))
             {
                 options.UseNpgsql(configConnectionString, npgsqlOptions =>
@@ -49,12 +53,37 @@ public static class DependencyInjection
         });
         services.AddScoped<IConfigDbContext>(provider => provider.GetRequiredService<ConfigDbContext>());
 
+        // 3. ManualPortalDbContext (schema "verification_portal", Postgres role "manual_portal_role")
+        var manualPortalConnectionString = configuration.GetConnectionString("ManualPortal")
+            ?? configuration.GetConnectionString("Config"); // Fallback to Config string if ManualPortal not set
+        services.AddDbContext<ManualPortalDbContext>(options =>
+        {
+            options.ConfigureWarnings(warnings =>
+                warnings.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
+            if (!string.IsNullOrEmpty(manualPortalConnectionString))
+            {
+                options.UseNpgsql(manualPortalConnectionString, npgsqlOptions =>
+                {
+                    npgsqlOptions.MigrationsHistoryTable("__EFMigrationsHistory", "verification_portal");
+                });
+            }
+            else
+            {
+                options.UseInMemoryDatabase("CHL_ManualPortalDb_Dev");
+            }
+        });
+        services.AddScoped<IManualPortalDbContext>(provider => provider.GetRequiredService<ManualPortalDbContext>());
+
         // 3. Cryptography & Auth Services
         services.AddSingleton<IHmacService, HmacService>();
         services.AddSingleton<IEncryptionService, EncryptionService>();
         services.AddSingleton<IPasswordHasher, BCryptPasswordHasher>();
         services.AddSingleton<IJwtTokenService, JwtTokenService>();
         services.AddScoped<IApiKeyValidationService, ApiKeyValidationService>();
+
+        // 3c. Admin OTP / two-factor authentication (email delivery over SMTP)
+        services.AddSingleton<IOtpEmailService, SmtpEmailService>();
+        services.AddScoped<IOtpService, OtpService>();
 
         // 3b. Object storage (MinIO / S3-compatible)
         services.AddSingleton<IBlobStorageService, MinioBlobStorageService>();
@@ -68,6 +97,11 @@ public static class DependencyInjection
 
         // 6. Verification Application Service
         services.AddScoped<IVerificationService, VerificationService>();
+
+        // 7. NRB health monitoring (passive) + billing
+        services.AddSingleton<INrbHealthMonitor, NrbHealthMonitor>();
+        services.AddScoped<IBillingService, BillingService>();
+        services.AddHostedService<MonthlyUsageReportJob>();
 
         return services;
     }

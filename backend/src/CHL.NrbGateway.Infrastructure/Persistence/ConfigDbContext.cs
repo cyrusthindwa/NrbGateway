@@ -9,6 +9,7 @@ public class ConfigDbContext : DbContext, IConfigDbContext
     public ConfigDbContext(DbContextOptions<ConfigDbContext> options) : base(options) { }
 
     public IQueryable<AdminUser> AdminUsers => Set<AdminUser>();
+    public IQueryable<AdminOtpCode> AdminOtpCodes => Set<AdminOtpCode>();
     public IQueryable<Company> Companies => Set<Company>();
     public IQueryable<Project> Projects => Set<Project>();
     public IQueryable<ProjectApiKey> ProjectApiKeys => Set<ProjectApiKey>();
@@ -40,6 +41,18 @@ public class ConfigDbContext : DbContext, IConfigDbContext
             entity.Property(e => e.Status).HasConversion<string>();
         });
 
+        modelBuilder.Entity<AdminOtpCode>(entity =>
+        {
+            entity.ToTable("admin_otp_codes");
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.AdminId);
+
+            entity.HasOne(e => e.Admin)
+                .WithMany(a => a.OtpCodes)
+                .HasForeignKey(e => e.AdminId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<Company>(entity =>
         {
             entity.ToTable("companies");
@@ -52,6 +65,7 @@ public class ConfigDbContext : DbContext, IConfigDbContext
             entity.ToTable("projects");
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => e.ShortCode).IsUnique();
+            entity.Property(e => e.ProjectType).HasDefaultValue("SYSTEM_INTEGRATION");
 
             entity.HasOne(e => e.Company)
                 .WithMany(c => c.Projects)

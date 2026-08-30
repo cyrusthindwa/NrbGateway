@@ -3,6 +3,7 @@ using System;
 using CHL.NrbGateway.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace CHL.NrbGateway.Infrastructure.Migrations.ConfigDb
 {
     [DbContext(typeof(ConfigDbContext))]
-    partial class ConfigDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260819101047_AddAdminOtpCodes")]
+    partial class AddAdminOtpCodes
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -77,12 +80,6 @@ namespace CHL.NrbGateway.Infrastructure.Migrations.ConfigDb
 
                     b.Property<string>("PasswordHash")
                         .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<DateTimeOffset?>("PasswordResetExpiresAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("PasswordResetTokenHash")
                         .HasColumnType("text");
 
                     b.Property<string>("Status")
@@ -443,33 +440,15 @@ namespace CHL.NrbGateway.Infrastructure.Migrations.ConfigDb
                     b.Property<DateTimeOffset?>("CompletedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<int>("DeceasedCount")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("ErrorCount")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("ExpiredCount")
-                        .HasColumnType("integer");
-
                     b.Property<Guid?>("InitiatedBy")
                         .HasColumnType("uuid");
-
-                    b.Property<int>("SeeNrbCount")
-                        .HasColumnType("integer");
 
                     b.Property<DateTimeOffset>("StartedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<int>("TotalCount")
-                        .HasColumnType("integer");
-
                     b.Property<string>("TriggerType")
                         .IsRequired()
                         .HasColumnType("text");
-
-                    b.Property<int>("ValidCount")
-                        .HasColumnType("integer");
 
                     b.HasKey("Id");
 
