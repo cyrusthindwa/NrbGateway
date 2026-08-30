@@ -46,6 +46,7 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       ConnectionStrings__Kyc: Host=postgres;Port=5432;Database=${POSTGRES_DB:-chl_nrb_gateway};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-password};SearchPath=kyc,public
       ConnectionStrings__Config: Host=postgres;Port=5432;Database=${POSTGRES_DB:-chl_nrb_gateway};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-password};SearchPath=config,public
+      ConnectionStrings__ManualPortal: Host=postgres;Port=5432;Database=${POSTGRES_DB:-chl_nrb_gateway};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-password};SearchPath=verification_portal,config,kyc,public
       Nrb__BaseUrl: ${NRB_BASE_URL}
       Nrb__TokenEndpoint: ${NRB_TOKEN_ENDPOINT}
       Nrb__ClientId: ${NRB_CLIENT_ID}
@@ -63,6 +64,21 @@ services:
       BlobStorage__SecretKey: ${MINIO_ROOT_PASSWORD:-minioadmin}
       BlobStorage__UseSsl: "false"
       BlobStorage__Bucket: ${MINIO_BUCKET:-nrb-documents}
+      M365__TenantId: ${M365_TENANT_ID:-}
+      M365__ClientId: ${M365_CLIENT_ID:-}
+      M365__ClientSecret: ${M365_CLIENT_SECRET:-}
+      M365__SenderAddress: ${M365_SENDER_ADDRESS:-}
+      Otp__CodeLength: ${OTP_CODE_LENGTH:-6}
+      Otp__ExpiryMinutes: ${OTP_EXPIRY_MINUTES:-10}
+      Otp__MaxAttempts: ${OTP_MAX_ATTEMPTS:-5}
+      Portal__BaseUrl: ${PORTAL_BASE_URL:-http://localhost:3000}
+      ManualPortal__BaseUrl: ${MANUAL_PORTAL_BASE_URL:-http://localhost:3001}
+      Mail__Host: ${MAIL_HOST:-}
+      Mail__Port: ${MAIL_PORT:-587}
+      Mail__Username: ${MAIL_USERNAME:-}
+      Mail__Password: ${MAIL_PASSWORD:-}
+      Mail__FromAddress: ${MAIL_FROM_ADDRESS:-}
+      Mail__FromName: ${MAIL_FROM_NAME:-NRB Gateway Console}
     ports:
       - "${API_PORT:-5050}:5050"
     networks:
@@ -80,6 +96,21 @@ services:
       - api
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
+    networks:
+      - chl_nrb_network
+
+  manual-portal:
+    build:
+      context: ./manual-portal
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:5050}
+    container_name: chl_nrb_manual_portal
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "${MANUAL_PORTAL_PORT:-3001}:3001"
     networks:
       - chl_nrb_network
 

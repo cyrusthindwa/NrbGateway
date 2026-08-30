@@ -5,7 +5,7 @@
 
 -- Insert sample admin user (BCrypt hash for 'password')
 -- The hash below is BCrypt for the password 'password' (12 rounds)
-INSERT INTO config."AdminUsers" (
+INSERT INTO config.admin_users (
     "Id", "Name", "Email", "PasswordHash", "Status", "CreatedAt", "UpdatedAt"
 ) VALUES (
     gen_random_uuid(),
