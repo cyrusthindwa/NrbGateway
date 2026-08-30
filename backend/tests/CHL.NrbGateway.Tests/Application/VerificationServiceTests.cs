@@ -41,7 +41,7 @@ public class VerificationServiceTests
         IBlobStorageService blobStorage)
     {
         return new VerificationService(kycDb, configDb, adapter, hmac, encryption, blobStorage,
-            BuildConfiguration(), new NullLogger<VerificationService>());
+            BuildConfiguration(), Mock.Of<INrbHealthMonitor>(), new NullLogger<VerificationService>());
     }
 
     [Fact]
