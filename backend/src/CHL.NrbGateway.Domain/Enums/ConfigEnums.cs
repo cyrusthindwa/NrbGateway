@@ -31,7 +31,11 @@ public enum SettingArea
     TIER_TOGGLE,
     NRB_ENVIRONMENT,
     AUDIT_RETENTION,
-    ADMIN_USER
+    ADMIN_USER,
+    COMPANY,
+    PROJECT,
+    NOTIFICATION_CHANNEL,
+    MANUAL_PORTAL_USER
 }
 
 public enum BillingInvoiceStatus

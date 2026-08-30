@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using CHL.NrbGateway.Domain.Enums;
 
 namespace CHL.NrbGateway.Domain.Entities.Config;
@@ -12,12 +13,29 @@ public class AdminUser
     public DateTimeOffset? LastLoginAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public string? PasswordResetTokenHash { get; set; }
+    public DateTimeOffset? PasswordResetExpiresAt { get; set; }
 
     public ICollection<ProjectApiKey> CreatedApiKeys { get; set; } = new List<ProjectApiKey>();
     public ICollection<VerificationTierSetting> UpdatedTierSettings { get; set; } = new List<VerificationTierSetting>();
     public ICollection<NrbEnvironmentSetting> UpdatedEnvSettings { get; set; } = new List<NrbEnvironmentSetting>();
     public ICollection<ConfigAuditLog> AuditLogs { get; set; } = new List<ConfigAuditLog>();
     public ICollection<NotificationChannel> CreatedNotificationChannels { get; set; } = new List<NotificationChannel>();
+    public ICollection<AdminOtpCode> OtpCodes { get; set; } = new List<AdminOtpCode>();
+}
+
+/// <summary>One-time passcode issued during admin two-factor login.</summary>
+public class AdminOtpCode
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid AdminId { get; set; }
+    public string CodeHash { get; set; } = default!;
+    public DateTimeOffset ExpiresAt { get; set; }
+    public bool Used { get; set; }
+    public int AttemptCount { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    public AdminUser Admin { get; set; } = default!;
 }
 
 /// <summary>Top-level entity (e.g. CDH Investment Bank).</summary>
@@ -38,6 +56,7 @@ public class Project
     public Guid CompanyId { get; set; }
     public string Name { get; set; } = default!;
     public string ShortCode { get; set; } = default!;
+    public string ProjectType { get; set; } = "SYSTEM_INTEGRATION"; // SYSTEM_INTEGRATION | MANUAL_PORTAL
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 
     public Company Company { get; set; } = default!;
@@ -62,6 +81,7 @@ public class ProjectApiKey
 
 public class VerificationTierSetting
 {
+    [Key]
     public NrbTier Tier { get; set; } // Primary Key
     public bool Enabled { get; set; }
     public decimal CostPerRequest { get; set; }
@@ -107,6 +127,12 @@ public class RevalidationBatch
     public Guid? InitiatedBy { get; set; } // null for scheduled runs
     public DateTimeOffset StartedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? CompletedAt { get; set; }
+    public int TotalCount { get; set; }
+    public int ValidCount { get; set; }
+    public int ExpiredCount { get; set; }
+    public int DeceasedCount { get; set; }
+    public int SeeNrbCount { get; set; }
+    public int ErrorCount { get; set; }
 
     public AdminUser? Initiator { get; set; }
 }
