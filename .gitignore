@@ -21,7 +21,20 @@ obj/
 .env.*
 !.env.example
 
+# Local appsettings overrides / user secrets
+appsettings.*.local.json
+secrets.json
+
+# Private keys & certificates
+*.pem
+*.key
+*.pfx
+*.p12
+*.crt
+
 # OS files
 .DS_Store
 Thumbs.db
 desktop.ini
+
+

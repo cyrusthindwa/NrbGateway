@@ -82,13 +82,16 @@ cp .env.example .env
 docker compose up --build
 ```
 
-This starts four services on a shared Docker network:
-- **frontend** (Next.js) on `http://localhost:${FRONTEND_PORT:-3000}`
-- **api** (ASP.NET Core) on `http://localhost:${API_PORT:-5050}` — the only service that talks to Postgres/MinIO
-- **postgres** (`postgres:18-alpine`) — runs `scripts/01-init.sql` which enables `pgcrypto`, creates schemas `kyc` and `config`, and creates roles `gateway_role` / `portal_role`
+This starts five services on a shared Docker network:
+- **frontend** (Next.js Admin Console) on `http://localhost:${FRONTEND_PORT:-3000}`
+- **manual-portal** (Next.js Manual Verification Portal) on `http://localhost:${MANUAL_PORTAL_PORT:-3001}` — staff-facing manual lookup interface
+- **api** (ASP.NET Core) on `http://localhost:${API_PORT:-5050}` — backend service handling gateway requests and portal operations
+- **postgres** (`postgres:18-alpine`) — runs `scripts/01-init.sql` & `scripts/07-seed-manual-portal.sql` (schemas `kyc`, `config`, `verification_portal`)
 - **minio** (S3-compatible object storage) — holds document blobs referenced by `individual_documents.blob_ref`
 
-The API applies EF migrations and dev seed data automatically on startup. Only the API and frontend ports are exposed; Postgres and MinIO are internal to the Docker network. A `docker-compose.override.yml` re-exposes Postgres (`5433`) and MinIO (`9000`/`9001`) on the host for local development.
+The API applies EF migrations and dev seed data automatically on startup.
+- **ICT Admin Login**: `cthindwa@continental.mw` / `password` or `admin@continental.mw` / `Password123!`
+- **Manual Portal Dev Login**: `agent@cdhbank.mw` / `Password123!`
 
 ### Option B — Run the API locally against Docker Postgres
 
