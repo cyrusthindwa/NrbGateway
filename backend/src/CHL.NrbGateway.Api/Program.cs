@@ -12,6 +12,12 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
 using Serilog;
 
+// 0. Load .env for local development so secrets stay out of appsettings / source control.
+if (string.Equals(Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT"), "Development", StringComparison.OrdinalIgnoreCase))
+{
+    LoadDotEnv(Directory.GetCurrentDirectory());
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 // 1. Configure Serilog structured logging
@@ -150,6 +156,53 @@ using (var scope = app.Services.CreateScope())
             configDb.Database.Migrate();
             var kycDb = scope.ServiceProvider.GetRequiredService<KycDbContext>();
             kycDb.Database.Migrate();
+
+            configDb.Database.ExecuteSqlRaw(@"ALTER TABLE config.projects ADD COLUMN IF NOT EXISTS ""ProjectType"" TEXT NOT NULL DEFAULT 'SYSTEM_INTEGRATION';");
+
+            var manualDb = scope.ServiceProvider.GetRequiredService<ManualPortalDbContext>();
+            try
+            {
+                manualDb.Database.ExecuteSqlRaw(@"
+                    CREATE SCHEMA IF NOT EXISTS verification_portal;
+                    CREATE TABLE IF NOT EXISTS verification_portal.manual_users (
+                        ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        ""CompanyId"" UUID NOT NULL REFERENCES config.companies(""Id"") ON DELETE CASCADE,
+                        ""Email"" TEXT NOT NULL UNIQUE,
+                        ""PasswordHash"" TEXT NOT NULL,
+                        ""Status"" TEXT NOT NULL DEFAULT 'ACTIVE',
+                        ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        ""LastLoginAt"" TIMESTAMPTZ NULL,
+                        ""PasswordResetTokenHash"" TEXT NULL,
+                        ""PasswordResetExpiresAt"" TIMESTAMPTZ NULL
+                    );
+                    CREATE TABLE IF NOT EXISTS verification_portal.manual_verification_log (
+                        ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        ""ManualUserId"" UUID NOT NULL REFERENCES verification_portal.manual_users(""Id"") ON DELETE CASCADE,
+                        ""CompanyId"" UUID NOT NULL REFERENCES config.companies(""Id"") ON DELETE CASCADE,
+                        ""NationalIdMasked"" TEXT NOT NULL,
+                        ""ResultStatus"" TEXT NOT NULL,
+                        ""GatewayRequestId"" UUID NULL REFERENCES kyc.gateway_requests(""Id"") ON DELETE SET NULL,
+                        ""RequestedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    );
+                    CREATE TABLE IF NOT EXISTS verification_portal.manual_user_otp_codes (
+                        ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        ""ManualUserId"" UUID NOT NULL REFERENCES verification_portal.manual_users(""Id"") ON DELETE CASCADE,
+                        ""CodeHash"" TEXT NOT NULL,
+                        ""ExpiresAt"" TIMESTAMPTZ NOT NULL,
+                        ""Used"" BOOLEAN NOT NULL DEFAULT FALSE,
+                        ""AttemptCount"" INT NOT NULL DEFAULT 0,
+                        ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    );
+
+                    ALTER TABLE verification_portal.manual_users ADD COLUMN IF NOT EXISTS ""PasswordResetTokenHash"" TEXT NULL;
+                    ALTER TABLE verification_portal.manual_users ADD COLUMN IF NOT EXISTS ""PasswordResetExpiresAt"" TIMESTAMPTZ NULL;
+                ");
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "Raw DDL table creation skipped, ensuring created via EF Core...");
+                manualDb.Database.EnsureCreated();
+            }
         }
 
         if (isInMemory || canConnect)
@@ -174,9 +227,11 @@ using (var scope = app.Services.CreateScope())
                 configDb.Add(camCompany);
                 configDb.SaveChanges();
 
-                var cdhProject = new Project { Id = Guid.NewGuid(), CompanyId = cdhCompany.Id, Name = "CDH Investment Bank — Gateway", ShortCode = "CDHIB", CreatedAt = DateTimeOffset.UtcNow };
-                var camProject = new Project { Id = Guid.NewGuid(), CompanyId = camCompany.Id, Name = "CAM — Gateway", ShortCode = "CAM", CreatedAt = DateTimeOffset.UtcNow };
+                var cdhProject = new Project { Id = Guid.NewGuid(), CompanyId = cdhCompany.Id, Name = "CDH Investment Bank — Gateway", ShortCode = "CDHIB", ProjectType = "SYSTEM_INTEGRATION", CreatedAt = DateTimeOffset.UtcNow };
+                var cdhManualProject = new Project { Id = Guid.NewGuid(), CompanyId = cdhCompany.Id, Name = "Manual Verification Interface", ShortCode = "CDH-MAN", ProjectType = "MANUAL_PORTAL", CreatedAt = DateTimeOffset.UtcNow };
+                var camProject = new Project { Id = Guid.NewGuid(), CompanyId = camCompany.Id, Name = "CAM — Gateway", ShortCode = "CAM", ProjectType = "SYSTEM_INTEGRATION", CreatedAt = DateTimeOffset.UtcNow };
                 configDb.Add(cdhProject);
+                configDb.Add(cdhManualProject);
                 configDb.Add(camProject);
                 configDb.SaveChanges();
 
@@ -194,14 +249,62 @@ using (var scope = app.Services.CreateScope())
                     CreatedBy = admin.Id
                 });
 
-                // Default tier settings — only INTERMEDIATE is enabled for MVP
-                configDb.Add(new VerificationTierSetting { Tier = NrbTier.BASIC, Enabled = false, CostPerRequest = 0m, UpdatedAt = DateTimeOffset.UtcNow, UpdatedBy = admin.Id });
-                configDb.Add(new VerificationTierSetting { Tier = NrbTier.TEXT_LOOKUP, Enabled = false, CostPerRequest = 0m, UpdatedAt = DateTimeOffset.UtcNow, UpdatedBy = admin.Id });
-                configDb.Add(new VerificationTierSetting { Tier = NrbTier.INTERMEDIATE, Enabled = true, CostPerRequest = 0m, UpdatedAt = DateTimeOffset.UtcNow, UpdatedBy = admin.Id });
-                configDb.Add(new VerificationTierSetting { Tier = NrbTier.ADVANCED, Enabled = false, CostPerRequest = 0m, UpdatedAt = DateTimeOffset.UtcNow, UpdatedBy = admin.Id });
-                configDb.SaveChanges();
+                var devManualKey = "sec_live_cdh_manual_key_12345";
+                configDb.Add(new ProjectApiKey
+                {
+                    Id = Guid.NewGuid(),
+                    ProjectId = cdhManualProject.Id,
+                    KeyHash = apiKeyService.HashApiKey(devManualKey),
+                    KeyPrefix = devManualKey[..12],
+                    Status = ApiKeyStatus.ACTIVE,
+                    RateLimitPerMinute = 1000,
+                    CreatedAt = DateTimeOffset.UtcNow,
+                    CreatedBy = admin.Id
+                });
 
-                Log.Information("Dev seed complete. CDHIB test API key prefix: {Prefix}", devKey[..12]);
+                // Default tier settings — ensure TEXT_LOOKUP is enabled
+                configDb.Add(new VerificationTierSetting { Tier = NrbTier.BASIC, Enabled = true, CostPerRequest = 20m, UpdatedAt = DateTimeOffset.UtcNow, UpdatedBy = admin.Id });
+                configDb.Add(new VerificationTierSetting { Tier = NrbTier.TEXT_LOOKUP, Enabled = true, CostPerRequest = 50m, UpdatedAt = DateTimeOffset.UtcNow, UpdatedBy = admin.Id });
+                configDb.Add(new VerificationTierSetting { Tier = NrbTier.INTERMEDIATE, Enabled = true, CostPerRequest = 30m, UpdatedAt = DateTimeOffset.UtcNow, UpdatedBy = admin.Id });
+                configDb.Add(new VerificationTierSetting { Tier = NrbTier.ADVANCED, Enabled = true, CostPerRequest = 100m, UpdatedAt = DateTimeOffset.UtcNow, UpdatedBy = admin.Id });
+                configDb.SaveChanges();
+            }
+
+            // Unconditional check for Manual Portal User and Internal Project
+            var manualDb = scope.ServiceProvider.GetRequiredService<ManualPortalDbContext>();
+            var company = configDb.Companies.FirstOrDefault(c => c.ShortCode == "CDHIB");
+            if (company != null)
+            {
+                var manualProj = configDb.Projects.FirstOrDefault(p => p.CompanyId == company.Id && p.ProjectType == "MANUAL_PORTAL");
+                if (manualProj == null)
+                {
+                    manualProj = new Project
+                    {
+                        Id = Guid.NewGuid(),
+                        CompanyId = company.Id,
+                        Name = "Manual Verification Interface",
+                        ShortCode = "CDH-MAN",
+                        ProjectType = "MANUAL_PORTAL",
+                        CreatedAt = DateTimeOffset.UtcNow
+                    };
+                    configDb.Add(manualProj);
+                    configDb.SaveChanges();
+                }
+
+                if (!manualDb.ManualUsers.Any(u => u.Email == "agent@cdhbank.mw"))
+                {
+                    manualDb.Add(new CHL.NrbGateway.Domain.Entities.ManualPortal.ManualUser
+                    {
+                        Id = Guid.NewGuid(),
+                        CompanyId = company.Id,
+                        Email = "agent@cdhbank.mw",
+                        PasswordHash = passwordHasher.HashPassword("Password123!"),
+                        Status = "ACTIVE",
+                        CreatedAt = DateTimeOffset.UtcNow
+                    });
+                    manualDb.SaveChanges();
+                    Log.Information("Dev seed manual portal user created: agent@cdhbank.mw / Password123!");
+                }
             }
         }
     }
@@ -212,6 +315,68 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.Run();
+
+// Loads a .env file (repo root or any ancestor of the current directory) into
+// environment variables for local development. Values map to .NET configuration
+// keys via the "__" separator convention (e.g. MAIL_PASSWORD -> Mail__Password).
+static void LoadDotEnv(string startDirectory)
+{
+    var envFile = FindDotEnv(startDirectory);
+    if (envFile is null)
+        return;
+
+    foreach (var rawLine in File.ReadLines(envFile))
+    {
+        var line = rawLine.Trim();
+        if (line.Length == 0 || line.StartsWith('#'))
+            continue;
+
+        var separator = line.IndexOf('=');
+        if (separator <= 0)
+            continue;
+
+        var key = line[..separator].Trim();
+        var value = line[(separator + 1)..].Trim();
+
+        if (value.Length >= 2 && value[0] == '"' && value[^1] == '"')
+            value = value[1..^1];
+
+        if (key.Length == 0)
+            continue;
+
+        var envName = ToEnvironmentVariableName(key);
+        if (Environment.GetEnvironmentVariable(envName) is null)
+            Environment.SetEnvironmentVariable(envName, value);
+    }
+}
+
+static string? FindDotEnv(string startDirectory)
+{
+    var directory = new DirectoryInfo(startDirectory);
+    while (directory is not null)
+    {
+        var candidate = Path.Combine(directory.FullName, ".env");
+        if (File.Exists(candidate))
+            return candidate;
+        directory = directory.Parent;
+    }
+
+    return null;
+}
+
+static string ToEnvironmentVariableName(string envKey)
+{
+    var parts = envKey.Split('_', StringSplitOptions.RemoveEmptyEntries);
+    if (parts.Length == 0)
+        return envKey;
+
+    static string Pascal(string value) =>
+        char.ToUpperInvariant(value[0]) + value[1..].ToLowerInvariant();
+
+    var section = Pascal(parts[0]);
+    var suffix = string.Concat(parts.Skip(1).Select(Pascal));
+    return suffix.Length == 0 ? section : $"{section}__{suffix}";
+}
 
 // Required by xUnit WebApplicationFactory
 public partial class Program { }

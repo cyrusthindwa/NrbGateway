@@ -225,6 +225,39 @@ public class ProjectsController : ControllerBase
         return await IssueApiKey(id, 100, ApiKeyEnvironment.TEST, cancellationToken);
     }
 
+    [HttpPut("{id:guid}/api-keys/{keyId:guid}/rate-limit")]
+    public async Task<ActionResult<ProjectApiKeySummaryDto>> UpdateRateLimit(
+        Guid id, Guid keyId, [FromBody] UpdateRateLimitDto dto, CancellationToken cancellationToken)
+    {
+        var apiKey = _configDbContext.ProjectApiKeys
+            .FirstOrDefault(k => k.Id == keyId && k.ProjectId == id);
+
+        if (apiKey == null) return NotFound(new { message = "API key not found." });
+
+        var oldValue = apiKey.RateLimitPerMinute;
+        apiKey.RateLimitPerMinute = dto.RateLimitPerMinute;
+        _configDbContext.Update(apiKey);
+
+        var adminUser = _configDbContext.AdminUsers.FirstOrDefault();
+        var adminId = adminUser?.Id ?? Guid.Empty;
+        _configDbContext.Add(new ConfigAuditLog
+        {
+            Id = Guid.NewGuid(),
+            AdminId = adminId,
+            SettingArea = SettingArea.RATE_LIMIT,
+            SettingKey = $"project_api_key.{keyId}.rate_limit",
+            OldValue = oldValue.ToString(),
+            NewValue = dto.RateLimitPerMinute.ToString(),
+            ChangedAt = DateTimeOffset.UtcNow
+        });
+
+        await _configDbContext.SaveChangesAsync(cancellationToken);
+
+        return Ok(new ProjectApiKeySummaryDto(
+            apiKey.Id, apiKey.ProjectId, apiKey.KeyPrefix, apiKey.Status,
+            apiKey.RateLimitPerMinute, apiKey.CreatedAt, apiKey.RotatedAtRevokedAt));
+    }
+
     [HttpGet("{id:guid}/usage")]
     public ActionResult<IEnumerable<DailyUsageDto>> GetProjectUsage(Guid id)
     {

@@ -23,25 +23,59 @@ public class DashboardController : ControllerBase
     [HttpGet("metrics")]
     public ActionResult<DashboardMetricsDto> GetMetrics()
     {
+        var now = DateTimeOffset.UtcNow;
+        var today = new DateTimeOffset(now.Year, now.Month, now.Day, 0, 0, 0, TimeSpan.Zero);
+        var yesterday = today.AddDays(-1);
+
         var activeProjects = _configDbContext.Projects.Count();
-        
-        var today = DateTimeOffset.UtcNow.Date;
+
+        var monthStart = new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
+        var lastMonthStart = monthStart.AddMonths(-1);
+        var newProjectsThisMonth = _configDbContext.Projects.Count(p => p.CreatedAt >= monthStart);
+        var newProjectsLastMonth = _configDbContext.Projects.Count(p => p.CreatedAt >= lastMonthStart && p.CreatedAt < monthStart);
+        var activeProjectsChange = newProjectsThisMonth - newProjectsLastMonth;
+
         var requestsToday = _kycDbContext.GatewayRequests
             .Count(r => r.RequestTimestamp >= today);
+        var requestsYesterday = _kycDbContext.GatewayRequests
+            .Count(r => r.RequestTimestamp >= yesterday && r.RequestTimestamp < today);
+        var requestsTodayChange = requestsToday - requestsYesterday;
 
         var totalServed = _kycDbContext.GatewayRequests.Count();
         var cacheServed = _kycDbContext.GatewayRequests.Count(r => r.ServedFrom == Domain.Enums.ServedFrom.CACHE);
-        double cacheHitRate = totalServed > 0 ? Math.Round((double)cacheServed / totalServed * 100, 1) : 85.0;
+        double? cacheHitRate = totalServed > 0
+            ? Math.Round((double)cacheServed / totalServed * 100, 1)
+            : null;
+
+        var latestHealth = _configDbContext.NrbHealthChecks
+            .OrderByDescending(h => h.CheckedAt)
+            .FirstOrDefault();
+
+        string nrbLinkStatus;
+        int? nrbLinkLatency = null;
+        DateTimeOffset? nrbLastCheckedAt = null;
+
+        if (latestHealth == null)
+        {
+            nrbLinkStatus = "Not yet monitored";
+        }
+        else
+        {
+            nrbLinkStatus = latestHealth.IsUp ? "Healthy" : "Down";
+            nrbLinkLatency = latestHealth.LatencyMs;
+            nrbLastCheckedAt = latestHealth.CheckedAt;
+        }
 
         return Ok(new DashboardMetricsDto(
-            ActiveProjects: activeProjects > 0 ? activeProjects : 3,
-            ActiveProjectsChange: 0,
+            ActiveProjects: activeProjects,
+            ActiveProjectsChange: activeProjectsChange,
             RequestsToday: requestsToday,
-            RequestsTodayChange: 12,
+            RequestsTodayChange: requestsTodayChange,
             CacheHitRate: cacheHitRate,
             CacheHitRateTarget: 80.0,
-            NrbLinkStatus: "Healthy",
-            NrbLinkLatency: 45
+            NrbLinkStatus: nrbLinkStatus,
+            NrbLinkLatency: nrbLinkLatency,
+            NrbLastCheckedAt: nrbLastCheckedAt
         ));
     }
 

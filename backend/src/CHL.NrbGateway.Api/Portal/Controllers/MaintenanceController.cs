@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using CHL.NrbGateway.Application.Common.Interfaces;
+using CHL.NrbGateway.Application.DTOs;
 using CHL.NrbGateway.Application.Models;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
@@ -13,13 +14,16 @@ namespace CHL.NrbGateway.Api.Portal.Controllers;
 public class MaintenanceController : ControllerBase
 {
     private readonly IVerificationService _verificationService;
+    private readonly IConfigDbContext _configDbContext;
     private readonly ILogger<MaintenanceController> _logger;
 
     public MaintenanceController(
         IVerificationService verificationService,
+        IConfigDbContext configDbContext,
         ILogger<MaintenanceController> logger)
     {
         _verificationService = verificationService;
+        _configDbContext = configDbContext;
         _logger = logger;
     }
 
@@ -39,6 +43,16 @@ public class MaintenanceController : ControllerBase
         if (!Guid.TryParse(adminIdClaim, out var adminId))
             return Unauthorized(new { message = "Invalid admin identity." });
 
+        // Guard against stale sessions: a valid JWT can reference an admin account
+        // that no longer exists (e.g. after a schema reset). RevalidateAllAsync inserts
+        // RevalidationBatch.InitiatedBy with a FK to admin_users, which would otherwise
+        // surface as an unhelpful 500 FK violation.
+        if (!_configDbContext.AdminUsers.Any(a => a.Id == adminId))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                new { message = "Your admin session is no longer valid. Please log out and sign in again." });
+        }
+
         try
         {
             _logger.LogInformation("Revalidation triggered by admin {AdminId}", adminId);
@@ -48,7 +62,36 @@ public class MaintenanceController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Revalidation batch failed.");
-            return StatusCode(500, new { message = "Revalidation failed." });
+            return StatusCode(500, new { message = "Revalidation failed unexpectedly." });
         }
+    }
+
+    [HttpGet("revalidation-batches")]
+    public ActionResult<IEnumerable<RevalidationBatchDto>> GetRevalidationBatches()
+    {
+        var batches = _configDbContext.RevalidationBatches
+            .OrderByDescending(b => b.StartedAt)
+            .Take(50)
+            .Select(b => new RevalidationBatchDto(
+                b.Id, b.TriggerType, b.InitiatedBy,
+                b.Initiator != null ? b.Initiator.Name : null,
+                b.StartedAt, b.CompletedAt,
+                b.TotalCount, b.ValidCount, b.ExpiredCount, b.DeceasedCount, b.SeeNrbCount, b.ErrorCount))
+            .ToList();
+
+        return Ok(batches);
+    }
+
+    [HttpGet("revalidation-batches/{id:guid}")]
+    public ActionResult<RevalidationBatchDto> GetRevalidationBatch(Guid id)
+    {
+        var b = _configDbContext.RevalidationBatches.FirstOrDefault(x => x.Id == id);
+        if (b == null) return NotFound(new { message = "Revalidation batch not found." });
+
+        return Ok(new RevalidationBatchDto(
+            b.Id, b.TriggerType, b.InitiatedBy,
+            b.Initiator != null ? b.Initiator.Name : null,
+            b.StartedAt, b.CompletedAt,
+            b.TotalCount, b.ValidCount, b.ExpiredCount, b.DeceasedCount, b.SeeNrbCount, b.ErrorCount));
     }
 }

@@ -160,10 +160,10 @@ public class SettingsController : ControllerBase
             {
                 Id = Guid.NewGuid(),
                 Environment = dto.Environment,
-                BasicEndpointUrl = dto.BasicEndpointUrl,
-                TextLookupEndpointUrl = dto.TextLookupEndpointUrl,
-                IntermediateEndpointUrl = dto.IntermediateEndpointUrl,
-                AdvancedEndpointUrl = dto.AdvancedEndpointUrl,
+                BasicEndpointUrl = dto.BasicEndpointUrl ?? "https://nrb-api-test.cict.gov.mw/verify/postverify",
+                TextLookupEndpointUrl = dto.TextLookupEndpointUrl ?? "https://nrb-api-test.cict.gov.mw/api/person",
+                IntermediateEndpointUrl = dto.IntermediateEndpointUrl ?? "https://nrb-api-test.cict.gov.mw/middleware/iVerify",
+                AdvancedEndpointUrl = dto.AdvancedEndpointUrl ?? "https://nrb-api-test.cict.gov.mw/middleware/aVerify",
                 UpdatedAt = DateTimeOffset.UtcNow,
                 UpdatedBy = adminId
             };
@@ -173,10 +173,10 @@ public class SettingsController : ControllerBase
         {
             var oldEnv = envSetting.Environment.ToString();
             envSetting.Environment = dto.Environment;
-            envSetting.BasicEndpointUrl = dto.BasicEndpointUrl;
-            envSetting.TextLookupEndpointUrl = dto.TextLookupEndpointUrl;
-            envSetting.IntermediateEndpointUrl = dto.IntermediateEndpointUrl;
-            envSetting.AdvancedEndpointUrl = dto.AdvancedEndpointUrl;
+            if (dto.BasicEndpointUrl != null) envSetting.BasicEndpointUrl = dto.BasicEndpointUrl;
+            if (dto.TextLookupEndpointUrl != null) envSetting.TextLookupEndpointUrl = dto.TextLookupEndpointUrl;
+            if (dto.IntermediateEndpointUrl != null) envSetting.IntermediateEndpointUrl = dto.IntermediateEndpointUrl;
+            if (dto.AdvancedEndpointUrl != null) envSetting.AdvancedEndpointUrl = dto.AdvancedEndpointUrl;
             envSetting.UpdatedAt = DateTimeOffset.UtcNow;
             envSetting.UpdatedBy = adminId;
             _configDbContext.Update(envSetting);
