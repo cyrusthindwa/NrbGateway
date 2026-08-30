@@ -23,6 +23,7 @@ public interface IKycDbContext
 public interface IConfigDbContext
 {
     IQueryable<AdminUser> AdminUsers { get; }
+    IQueryable<AdminOtpCode> AdminOtpCodes { get; }
     IQueryable<Company> Companies { get; }
     IQueryable<Project> Projects { get; }
     IQueryable<ProjectApiKey> ProjectApiKeys { get; }
@@ -35,6 +36,18 @@ public interface IConfigDbContext
     IQueryable<NrbHealthCheck> NrbHealthChecks { get; }
     IQueryable<NrbDowntimeIncident> NrbDowntimeIncidents { get; }
     IQueryable<NotificationChannel> NotificationChannels { get; }
+
+    void Add<TEntity>(TEntity entity) where TEntity : class;
+    void Update<TEntity>(TEntity entity) where TEntity : class;
+
+    Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
+}
+
+public interface IManualPortalDbContext
+{
+    IQueryable<CHL.NrbGateway.Domain.Entities.ManualPortal.ManualUser> ManualUsers { get; }
+    IQueryable<CHL.NrbGateway.Domain.Entities.ManualPortal.ManualVerificationLog> ManualVerificationLogs { get; }
+    IQueryable<CHL.NrbGateway.Domain.Entities.ManualPortal.ManualUserOtpCode> ManualUserOtpCodes { get; }
 
     void Add<TEntity>(TEntity entity) where TEntity : class;
     void Update<TEntity>(TEntity entity) where TEntity : class;

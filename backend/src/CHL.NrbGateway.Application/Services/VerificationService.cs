@@ -22,6 +22,7 @@ public class VerificationService : IVerificationService
     private readonly IEncryptionService _encryptionService;
     private readonly IBlobStorageService _blobStorageService;
     private readonly IConfiguration _configuration;
+    private readonly INrbHealthMonitor _healthMonitor;
     private readonly ILogger<VerificationService> _logger;
 
     public VerificationService(
@@ -32,6 +33,7 @@ public class VerificationService : IVerificationService
         IEncryptionService encryptionService,
         IBlobStorageService blobStorageService,
         IConfiguration configuration,
+        INrbHealthMonitor healthMonitor,
         ILogger<VerificationService> logger)
     {
         _kycDbContext = kycDbContext;
@@ -41,6 +43,7 @@ public class VerificationService : IVerificationService
         _encryptionService = encryptionService;
         _blobStorageService = blobStorageService;
         _configuration = configuration;
+        _healthMonitor = healthMonitor;
         _logger = logger;
     }
 
@@ -92,8 +95,10 @@ public class VerificationService : IVerificationService
         else
         {
             _logger.LogInformation("Calling NRB Intermediate live for PIN {Hash}", pinHash);
-            nrbResp = await _nrbTierAdapter.VerifyIntermediateAsync(
-                new NrbIntermediateRequestModel(request.NationalId, request.BiometricBlob, projectCode),
+            nrbResp = await CallNrbAsync(
+                () => _nrbTierAdapter.VerifyIntermediateAsync(
+                    new NrbIntermediateRequestModel(request.NationalId, request.BiometricBlob, projectCode),
+                    cancellationToken),
                 cancellationToken);
             responseTimestamp = DateTimeOffset.UtcNow;
         }
@@ -151,11 +156,13 @@ public class VerificationService : IVerificationService
         else
         {
             _logger.LogInformation("Calling NRB Basic live for PIN {Hash} (always-live tier)", pinHash);
-            nrbResp = await _nrbTierAdapter.VerifyBasicAsync(
-                new NrbBasicRequestModel(
-                    request.IdNumber, request.Surname, request.FirstName, request.OtherNames,
-                    request.Nationality, request.Gender, request.DateOfBirthString,
-                    request.DateOfIssueString, request.DateOfExpiryString, request.PlaceOfBirthDistrictName),
+            nrbResp = await CallNrbAsync(
+                () => _nrbTierAdapter.VerifyBasicAsync(
+                    new NrbBasicRequestModel(
+                        request.IdNumber, request.Surname, request.FirstName, request.OtherNames,
+                        request.Nationality, request.Gender, request.DateOfBirthString,
+                        request.DateOfIssueString, request.DateOfExpiryString, request.PlaceOfBirthDistrictName),
+                    cancellationToken),
                 cancellationToken);
             responseTimestamp = DateTimeOffset.UtcNow;
         }
@@ -225,38 +232,51 @@ public class VerificationService : IVerificationService
                     cached.Id, cached.ResponseStatus, null, requestTimestamp);
                 await _kycDbContext.SaveChangesAsync(cancellationToken);
                 return new TextLookupResultDto(cachedGw.Id, request.IdNumber,
-                    cachedIndividual.Surname, cachedIndividual.FirstName, cachedIndividual.OtherNames,
+                    cachedIndividual.Surname ?? "", cachedIndividual.FirstName ?? "", cachedIndividual.OtherNames,
                     cachedIndividual.DateOfBirth ?? DateOnly.MinValue, cachedIndividual.Gender ?? "",
-                    photoRef, fingerprintRef, ServedFrom.CACHE, true, requestTimestamp);
+                    photoRef, fingerprintRef, ServedFrom.CACHE, true, requestTimestamp,
+                    cachedIndividual.CardStatus ?? "VALID", cachedIndividual.IdDateOfIssue, cachedIndividual.IdDateOfExpiry);
             }
         }
 
         if (IsSimulationMode())
         {
             var simIndividual = _kycDbContext.Individuals.FirstOrDefault(i => i.SubjectId == subject.SubjectId);
-            if (simIndividual != null)
+            if (simIndividual == null)
             {
-                var (sPhoto, sFinger) = GetDocumentRefs(simIndividual.SubjectId);
-                var simGw = PersistGatewayRequest(projectId, subject.SubjectId, ServedFrom.CACHE, null,
-                    IdentityVerifiedStatus, null, requestTimestamp);
+                simIndividual = new Individual
+                {
+                    SubjectId = subject.SubjectId,
+                    Surname = "BANDA",
+                    FirstName = "CHIKONDI",
+                    OtherNames = "JOHN",
+                    DateOfBirth = new DateOnly(1990, 5, 15),
+                    Gender = "MALE",
+                    CardStatus = "VALID",
+                    IdDateOfIssue = new DateOnly(2020, 1, 10),
+                    IdDateOfExpiry = new DateOnly(2030, 1, 10),
+                    CreatedAt = DateTimeOffset.UtcNow
+                };
+                _kycDbContext.Add(simIndividual);
                 await _kycDbContext.SaveChangesAsync(cancellationToken);
-                return new TextLookupResultDto(simGw.Id, request.IdNumber,
-                    simIndividual.Surname, simIndividual.FirstName, simIndividual.OtherNames,
-                    simIndividual.DateOfBirth ?? DateOnly.MinValue, simIndividual.Gender ?? "",
-                    sPhoto, sFinger, ServedFrom.CACHE, true, requestTimestamp);
             }
 
-            _logger.LogWarning("SIMULATION: PIN {Hash} not found in local mirror.", pinHash);
-            var simNfGw = PersistGatewayRequest(projectId, subject.SubjectId, ServedFrom.CACHE, null,
-                NotFoundStatus, null, requestTimestamp);
+            var (sPhoto, sFinger) = GetDocumentRefs(simIndividual.SubjectId);
+            var simGw = PersistGatewayRequest(projectId, subject.SubjectId, ServedFrom.CACHE, null,
+                IdentityVerifiedStatus, null, requestTimestamp);
             await _kycDbContext.SaveChangesAsync(cancellationToken);
-            return new TextLookupResultDto(simNfGw.Id, request.IdNumber,
-                "", "", null, DateOnly.MinValue, "", null, null, ServedFrom.CACHE, false, requestTimestamp);
+            return new TextLookupResultDto(simGw.Id, request.IdNumber,
+                simIndividual.Surname ?? "", simIndividual.FirstName ?? "", simIndividual.OtherNames,
+                simIndividual.DateOfBirth ?? DateOnly.MinValue, simIndividual.Gender ?? "",
+                sPhoto, sFinger, ServedFrom.CACHE, true, requestTimestamp,
+                simIndividual.CardStatus ?? "VALID", simIndividual.IdDateOfIssue, simIndividual.IdDateOfExpiry);
         }
 
         _logger.LogInformation("Calling NRB Text Lookup live for PIN {Hash}", pinHash);
-        var nrbResp = await _nrbTierAdapter.TextLookupAsync(
-            new NrbTextLookupRequestModel(request.IdNumber), cancellationToken);
+        var nrbResp = await CallNrbAsync(
+            () => _nrbTierAdapter.TextLookupAsync(
+                new NrbTextLookupRequestModel(request.IdNumber), cancellationToken),
+            cancellationToken);
         var responseTimestamp = DateTimeOffset.UtcNow;
 
         if (!nrbResp.IsFound)
@@ -266,7 +286,8 @@ public class VerificationService : IVerificationService
                 NotFoundStatus, TierCost(NrbTier.TEXT_LOOKUP), requestTimestamp);
             await _kycDbContext.SaveChangesAsync(cancellationToken);
             return new TextLookupResultDto(nfGw.Id, request.IdNumber,
-                "", "", null, DateOnly.MinValue, "", null, null, ServedFrom.NRB, false, requestTimestamp);
+                "", "", null, DateOnly.MinValue, "", null, null, ServedFrom.NRB, false, requestTimestamp,
+                "NOT FOUND", null, null);
         }
 
         var individual = EnsureIndividual(subject.SubjectId, requestTimestamp);
@@ -290,7 +311,8 @@ public class VerificationService : IVerificationService
         return new TextLookupResultDto(gw.Id, request.IdNumber,
             nrbResp.Surname, nrbResp.FirstName, nrbResp.OtherNames,
             nrbResp.DateOfBirth, nrbResp.Gender, faceRef, fingerRef,
-            ServedFrom.NRB, true, requestTimestamp);
+            ServedFrom.NRB, true, requestTimestamp,
+            nrbResp.CardStatus ?? "VALID", nrbResp.IssueDate, nrbResp.ExpiryDate);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -321,8 +343,10 @@ public class VerificationService : IVerificationService
         }
         else
         {
-            nrbResp = await _nrbTierAdapter.VerifyAdvancedAsync(
-                new NrbAdvancedRequestModel(request.NationalId, request.BiometricBlob, request.Otp),
+            nrbResp = await CallNrbAsync(
+                () => _nrbTierAdapter.VerifyAdvancedAsync(
+                    new NrbAdvancedRequestModel(request.NationalId, request.BiometricBlob, request.Otp),
+                    cancellationToken),
                 cancellationToken);
             responseTimestamp = DateTimeOffset.UtcNow;
         }
@@ -418,7 +442,7 @@ public class VerificationService : IVerificationService
                     individual.IdDateOfExpiry?.ToString("yyyy-MM-dd"),
                     individual.BirthDistrict);
 
-                var nrbResp = await _nrbTierAdapter.VerifyBasicAsync(nrbReq, cancellationToken);
+                var nrbResp = await CallNrbAsync(() => _nrbTierAdapter.VerifyBasicAsync(nrbReq, cancellationToken), cancellationToken);
 
                 bool statusChanged = !string.Equals(individual.CardStatus, nrbResp.CardStatus, StringComparison.OrdinalIgnoreCase);
                 individual.CardStatus = nrbResp.CardStatus;
@@ -462,6 +486,12 @@ public class VerificationService : IVerificationService
         await _kycDbContext.SaveChangesAsync(cancellationToken);
 
         batch.CompletedAt = DateTimeOffset.UtcNow;
+        batch.TotalCount = total;
+        batch.ValidCount = valid;
+        batch.ExpiredCount = expired;
+        batch.DeceasedCount = deceased;
+        batch.SeeNrbCount = seeNrb;
+        batch.ErrorCount = errors;
         _configDbContext.Update(batch);
 
         _configDbContext.Add(new ConfigAuditLog
@@ -490,6 +520,22 @@ public class VerificationService : IVerificationService
 
     private bool IsSimulationMode() =>
         bool.TryParse(_configuration["Nrb:SimulationMode"], out var sim) && sim;
+
+    private async Task<T> CallNrbAsync<T>(Func<Task<T>> call, CancellationToken cancellationToken)
+    {
+        var started = DateTimeOffset.UtcNow;
+        try
+        {
+            var result = await call();
+            await _healthMonitor.RecordAsync(true, (int)(DateTimeOffset.UtcNow - started).TotalMilliseconds, null, cancellationToken);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            await _healthMonitor.RecordAsync(false, null, ex.Message, cancellationToken);
+            throw;
+        }
+    }
 
     private void EnsureTierEnabled(NrbTier tier)
     {
@@ -751,7 +797,7 @@ public class VerificationService : IVerificationService
             return;
         }
 
-        var resp = await _nrbTierAdapter.TextLookupAsync(new NrbTextLookupRequestModel(nationalId), cancellationToken);
+        var resp = await CallNrbAsync(() => _nrbTierAdapter.TextLookupAsync(new NrbTextLookupRequestModel(nationalId), cancellationToken), cancellationToken);
         if (!resp.IsFound) return;
 
         ApplyTextLookupData(individual, resp, DateTimeOffset.UtcNow);

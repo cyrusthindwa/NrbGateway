@@ -27,4 +27,5 @@ public interface IPasswordHasher
 public interface IJwtTokenService
 {
     string GenerateToken(AdminUser adminUser);
+    string GenerateManualUserToken(CHL.NrbGateway.Domain.Entities.ManualPortal.ManualUser manualUser);
 }

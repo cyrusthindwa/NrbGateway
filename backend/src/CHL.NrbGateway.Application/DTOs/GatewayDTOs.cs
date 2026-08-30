@@ -62,7 +62,10 @@ public record TextLookupResultDto(
     string? FingerprintRef,      // Pointer to blob storage, not inline base64
     ServedFrom ServedFrom,
     bool Found,                  // false → ID not found in NRB registry
-    DateTimeOffset Timestamp
+    DateTimeOffset Timestamp,
+    string? CardStatus = "VALID",
+    DateOnly? IssueDate = null,
+    DateOnly? ExpiryDate = null
 );
 
 // ── Advanced (Tier 4) — Biometric + OTP ──────────────────────────────
