@@ -33,8 +33,7 @@ builder.Host.UseSerilog();
 builder.Services.AddInfrastructureServices(builder.Configuration);
 
 // 3. Add Authentication (API Key for Gateway + JWT Bearer for Portal)
-var jwtSecretKey = builder.Configuration["Jwt:SecretKey"]
-    ?? "DEFAULT_DEV_JWT_SECRET_KEY_REPLACE_WITH_SECRETS_STORE_IN_PRODUCTION_MIN_256_BITS";
+var jwtSecretKey = builder.Configuration["Jwt:SecretKey"] ?? throw new InvalidOperationException("Missing Jwt:SecretKey configuration.");
 
 builder.Services.AddAuthentication(options =>
 {

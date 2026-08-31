@@ -40,7 +40,7 @@ public class JwtTokenService : IJwtTokenService
 
     public string GenerateToken(AdminUser adminUser)
     {
-        var secret = _configuration["Jwt:SecretKey"] ?? "DEFAULT_DEV_JWT_SECRET_KEY_REPLACE_WITH_SECRETS_STORE_IN_PRODUCTION_MIN_256_BITS";
+        var secret = _configuration["Jwt:SecretKey"] ?? throw new InvalidOperationException("Missing Jwt:SecretKey configuration.");
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
@@ -65,7 +65,7 @@ public class JwtTokenService : IJwtTokenService
 
     public string GenerateManualUserToken(CHL.NrbGateway.Domain.Entities.ManualPortal.ManualUser manualUser)
     {
-        var secret = _configuration["Jwt:SecretKey"] ?? "DEFAULT_DEV_JWT_SECRET_KEY_REPLACE_WITH_SECRETS_STORE_IN_PRODUCTION_MIN_256_BITS";
+        var secret = _configuration["Jwt:SecretKey"] ?? throw new InvalidOperationException("Missing Jwt:SecretKey configuration.");
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 

@@ -29,8 +29,8 @@ public class ClientKeyAuthProvider : INrbAuthProvider
 
     public Task ApplyAuthAsync(HttpRequestMessage request, CancellationToken cancellationToken = default)
     {
-        var clientId = _configuration["Nrb:TextLookupClientId"] ?? "chl_gateway_text_lookup_dev";
-        var clientKey = _configuration["Nrb:TextLookupClientKey"] ?? "REPLACE_WITH_SECRETS_STORE_IN_PRODUCTION";
+        var clientId = _configuration["Nrb:TextLookupClientId"] ?? throw new InvalidOperationException("Missing Nrb:Text Lookup Client Id configuration.");
+        var clientKey = _configuration["Nrb:TextLookupClientKey"] ?? throw new InvalidOperationException("Missing Nrb:Text Lookup Client Key configuration.");
 
         request.Headers.Add("ClientId", clientId);
         request.Headers.Add("ClientKey", clientKey);

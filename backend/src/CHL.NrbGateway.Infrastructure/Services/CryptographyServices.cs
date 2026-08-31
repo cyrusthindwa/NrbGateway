@@ -11,7 +11,7 @@ public class HmacService : IHmacService
 
     public HmacService(IConfiguration configuration)
     {
-        var hmacKeyStr = configuration["Encryption:HmacKey"] ?? "DEFAULT_DEV_HMAC_KEY_REPLACE_WITH_SECRETS_STORE_IN_PRODUCTION";
+        var hmacKeyStr = configuration["Encryption:HmacKey"] ?? throw new InvalidOperationException("Missing Encryption:HmacKey configuration.");
         _keyBytes = Encoding.UTF8.GetBytes(hmacKeyStr);
     }
 
@@ -30,7 +30,7 @@ public class EncryptionService : IEncryptionService
 
     public EncryptionService(IConfiguration configuration)
     {
-        var secret = configuration["Encryption:PgpSymKey"] ?? "DEFAULT_DEV_PGP_KEY_REPLACE_WITH_SECRETS_STORE_IN_PRODUCTION";
+        var secret = configuration["Encryption:PgpSymKey"] ?? throw new InvalidOperationException("Missing Encryption:PgpSymKey configuration.");
         using var sha256 = SHA256.Create();
         _key = sha256.ComputeHash(Encoding.UTF8.GetBytes(secret));
     }
