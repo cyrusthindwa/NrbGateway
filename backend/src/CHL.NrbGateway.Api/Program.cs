@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json.Serialization;
 using CHL.NrbGateway.Api.Gateway.Authentication;
+using CHL.NrbGateway.Api.Gateway.RateLimiting;
 using CHL.NrbGateway.Application.Common.Interfaces;
 using CHL.NrbGateway.Domain.Entities.Config;
 using CHL.NrbGateway.Domain.Enums;
@@ -55,15 +56,42 @@ builder.Services.AddAuthentication(options =>
     };
 });
 
+// CORS: explicit allow-list of the two known frontend origins (admin console + manual portal).
+// Configurable via Cors:AllowedOrigins (comma-separated) in appsettings / environment.
+var allowedOrigins = (builder.Configuration["Cors:AllowedOrigins"]
+        ?? "http://localhost:3000,http://localhost:3001")
+    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
-        policy.SetIsOriginAllowed(_ => true)
+        policy.WithOrigins(allowedOrigins)
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials();
     });
+});
+
+// HSTS + HTTPS redirection. HSTS headers are only emitted outside Development;
+// the redirect target port is configurable via Https:Port.
+builder.Services.AddHsts(options =>
+{
+    options.MaxAge = TimeSpan.FromDays(365);
+    options.IncludeSubDomains = true;
+    options.Preload = true;
+});
+builder.Services.AddHttpsRedirection(options =>
+{
+    if (int.TryParse(builder.Configuration["Https:Port"], out var httpsPort) && httpsPort > 0)
+        options.HttpsPort = httpsPort;
+});
+
+// Per-API-key rate limiting for the Gateway surface (HTTP 429 on breach).
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy<string, ApiKeyRateLimiterPolicy>(ApiKeyRateLimiterPolicy.PolicyName);
 });
 
 builder.Services.AddAuthorization();
@@ -128,9 +156,18 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI(c =>
         c.SwaggerEndpoint("/swagger/v1/swagger.json", "CHL NRB Gateway API v1"));
 }
+else
+{
+    // HSTS header (max-age 1y, includeSubDomains, preload) — never sent in Development.
+    app.UseHsts();
+}
+
+// Redirect HTTP → HTTPS. Only active once an HTTPS port is reachable (see Https:Port).
+app.UseHttpsRedirection();
 
 app.UseSerilogRequestLogging();
 app.UseRouting();
+app.UseRateLimiter(); // enforces the per-API-key policies on gateway endpoints (429 on breach)
 app.UseCors("AllowFrontend");
 app.UseAuthentication();
 app.UseAuthorization();

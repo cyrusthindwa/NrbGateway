@@ -1,14 +1,17 @@
 using CHL.NrbGateway.Api.Gateway.Authentication;
+using CHL.NrbGateway.Api.Gateway.RateLimiting;
 using CHL.NrbGateway.Application.Common.Interfaces;
 using CHL.NrbGateway.Application.DTOs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace CHL.NrbGateway.Api.Gateway.Controllers;
 
 [ApiController]
 [Route("api/v1/gateway/[controller]")]
 [Authorize(AuthenticationSchemes = ApiKeyAuthenticationOptions.DefaultScheme)]
+[EnableRateLimiting(ApiKeyRateLimiterPolicy.PolicyName)]
 public class VerificationController : ControllerBase
 {
     private readonly IVerificationService _verificationService;

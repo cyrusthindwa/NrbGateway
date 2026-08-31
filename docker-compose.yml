@@ -79,6 +79,8 @@ services:
       Mail__Password: ${MAIL_PASSWORD:-}
       Mail__FromAddress: ${MAIL_FROM_ADDRESS:-}
       Mail__FromName: ${MAIL_FROM_NAME:-NRB Gateway Console}
+      Cors__AllowedOrigins: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001}
+      Https__Port: ${HTTPS_PORT:-}
     ports:
       - "${API_PORT:-5050}:5050"
     networks:
