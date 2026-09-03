@@ -59,7 +59,7 @@ builder.Services.AddAuthentication(options =>
 // CORS: explicit allow-list of the two known frontend origins (admin console + manual portal).
 // Configurable via Cors:AllowedOrigins (comma-separated) in appsettings / environment.
 var allowedOrigins = (builder.Configuration["Cors:AllowedOrigins"]
-        ?? "http://localhost:3000,http://localhost:3001")
+        ?? "http://localhost:3000,http://localhost:3001,http://kyc-dev.continental.mw,http://manual.kyc-dev.continental.mw")
     .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
 builder.Services.AddCors(options =>
