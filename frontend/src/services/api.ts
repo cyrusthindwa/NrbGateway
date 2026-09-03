@@ -24,7 +24,7 @@ import type {
   RevalidationResult,
 } from "@/types";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5050";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL;
 
 async function fetchWithAuth<T>(
   endpoint: string,
