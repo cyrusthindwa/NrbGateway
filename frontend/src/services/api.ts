@@ -48,10 +48,18 @@ async function fetchWithAuth<T>(
   });
 
   if (response.status === 401) {
-    localStorage.removeItem("nrb_token");
-    localStorage.removeItem("nrb_user");
-    window.location.href = "/login";
-    throw new Error("Unauthorized");
+    const isAuthEndpoint = endpoint.includes("/auth/login");
+    const isAlreadyOnLogin =
+      typeof window !== "undefined" && window.location.pathname === "/login";
+
+    if (!isAuthEndpoint && !isAlreadyOnLogin && typeof window !== "undefined") {
+      localStorage.removeItem("nrb_token");
+      localStorage.removeItem("nrb_user");
+      window.location.href = "/login";
+    }
+
+    const error = await response.json().catch(() => ({ message: "Invalid credentials or unauthorized" }));
+    throw new Error(error.message || "Unauthorized");
   }
 
   if (!response.ok) {

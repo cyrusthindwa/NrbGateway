@@ -3,6 +3,7 @@ export interface ManualUser {
   email: string;
   companyId: string;
   companyName: string;
+  mustChangePassword?: boolean;
 }
 
 export interface LoginResponse {
@@ -13,6 +14,7 @@ export interface LoginResponse {
   companyId?: string;
   companyName?: string;
   message?: string;
+  mustChangePassword?: boolean;
 }
 
 export interface VerificationResult {

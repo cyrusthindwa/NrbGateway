@@ -12,6 +12,7 @@ public class ManualUser
     public string Status { get; set; } = "ACTIVE"; // ACTIVE | DISABLED
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? LastLoginAt { get; set; }
+    public bool MustChangePassword { get; set; } = true;
     public string? PasswordResetTokenHash { get; set; }
     public DateTimeOffset? PasswordResetExpiresAt { get; set; }
 

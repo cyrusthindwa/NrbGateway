@@ -32,9 +32,12 @@ async function fetchWithAuth<T>(
     if (typeof window !== "undefined") {
       localStorage.removeItem("manual_token");
       localStorage.removeItem("manual_user");
-      window.location.href = "/login";
+      if (window.location.pathname !== "/login") {
+        window.location.href = "/login";
+      }
     }
-    throw new Error("Unauthorized");
+    const error = await response.json().catch(() => ({ message: "Unauthorized" }));
+    throw new Error(error.message || "Unauthorized");
   }
 
   if (!response.ok) {
@@ -134,5 +137,12 @@ export const apiService = {
     }
 
     return response.json();
+  },
+
+  changePassword: async (newPassword: string): Promise<{ message: string }> => {
+    return fetchWithAuth<{ message: string }>("/api/v1/manual-portal/auth/change-password", {
+      method: "POST",
+      body: JSON.stringify({ newPassword }),
+    });
   },
 };

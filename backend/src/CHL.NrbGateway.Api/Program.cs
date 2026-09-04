@@ -208,6 +208,7 @@ using (var scope = app.Services.CreateScope())
                         ""Status"" TEXT NOT NULL DEFAULT 'ACTIVE',
                         ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                         ""LastLoginAt"" TIMESTAMPTZ NULL,
+                        ""MustChangePassword"" BOOLEAN NOT NULL DEFAULT TRUE,
                         ""PasswordResetTokenHash"" TEXT NULL,
                         ""PasswordResetExpiresAt"" TIMESTAMPTZ NULL
                     );
@@ -230,6 +231,7 @@ using (var scope = app.Services.CreateScope())
                         ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW()
                     );
 
+                    ALTER TABLE verification_portal.manual_users ADD COLUMN IF NOT EXISTS ""MustChangePassword"" BOOLEAN NOT NULL DEFAULT TRUE;
                     ALTER TABLE verification_portal.manual_users ADD COLUMN IF NOT EXISTS ""PasswordResetTokenHash"" TEXT NULL;
                     ALTER TABLE verification_portal.manual_users ADD COLUMN IF NOT EXISTS ""PasswordResetExpiresAt"" TIMESTAMPTZ NULL;
                 ");

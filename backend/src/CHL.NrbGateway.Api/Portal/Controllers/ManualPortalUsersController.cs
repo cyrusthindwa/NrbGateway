@@ -88,6 +88,7 @@ public class ManualPortalUsersController : ControllerBase
             Email = email,
             PasswordHash = _passwordHasher.HashPassword(dto.Password),
             Status = "ACTIVE",
+            MustChangePassword = true,
             CreatedAt = DateTimeOffset.UtcNow
         };
 

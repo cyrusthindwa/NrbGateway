@@ -18,11 +18,13 @@ public record ManualUserLoginResponse(
     string? Token,
     Guid? CompanyId,
     string? CompanyName,
-    string? Message
+    string? Message,
+    bool MustChangePassword = false
 );
 public record ManualVerify2FaRequest(Guid UserId, string Code);
 public record ManualResend2FaRequest(Guid UserId);
 public record ManualResetPasswordRequest(Guid UserId, string Token, string NewPassword);
+public record ManualChangePasswordRequest(string NewPassword);
 
 public record ManualVerifyRequest(string NationalId);
 public record ManualLogItemDto(Guid Id, string NationalIdMasked, string ResultStatus, Guid? GatewayRequestId, DateTimeOffset RequestedAt);
@@ -190,13 +192,45 @@ public class ManualPortalController : ControllerBase
                 Token: token,
                 CompanyId: user.CompanyId,
                 CompanyName: company?.Name ?? "Company",
-                Message: "Sign-in successful."
+                Message: "Sign-in successful.",
+                MustChangePassword: user.MustChangePassword
             ));
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Manual portal 2FA verification failed for user {UserId}", request.UserId);
             return StatusCode(500, new { message = $"Verification error: {ex.Message}" });
+        }
+    }
+
+    [HttpPost("auth/change-password")]
+    [Authorize(AuthenticationSchemes = JwtBearerDefaults.AuthenticationScheme)]
+    public async Task<IActionResult> ChangePassword(
+        [FromBody] ManualChangePasswordRequest request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(request.NewPassword) || request.NewPassword.Length < 8)
+                return BadRequest(new { message = "New password must be at least 8 characters long." });
+
+            var (userId, _) = GetUserContext();
+            var user = _manualDbContext.ManualUsers.FirstOrDefault(u => u.Id == userId);
+            if (user == null || user.Status != "ACTIVE")
+                return Unauthorized(new { message = "User not found or account disabled." });
+
+            user.PasswordHash = _passwordHasher.HashPassword(request.NewPassword);
+            user.MustChangePassword = false;
+            _manualDbContext.Update(user);
+            await _manualDbContext.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation("Password changed successfully for user {UserId}", userId);
+            return Ok(new { message = "Password changed successfully." });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Manual portal change password failed");
+            return StatusCode(500, new { message = $"Change password error: {ex.Message}" });
         }
     }
 
