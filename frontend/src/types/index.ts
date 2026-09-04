@@ -226,16 +226,3 @@ export interface MonthlyUsageReport {
   totalCost: number;
   generatedAt: string;
 }
-
-export interface BillingInvoice {
-  id: string;
-  companyId: string;
-  companyName: string;
-  companyShortCode: string;
-  periodStart: string;
-  periodEnd: string;
-  totalAmount: number;
-  status: "PENDING" | "INVOICED" | "PAID";
-  generatedAt: string;
-  paidAt: string | null;
-}

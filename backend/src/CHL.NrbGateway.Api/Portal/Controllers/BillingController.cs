@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using CHL.NrbGateway.Application.Common.Interfaces;
 using CHL.NrbGateway.Application.DTOs;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -63,52 +62,5 @@ public class BillingController : ControllerBase
     {
         await _billingService.GenerateMonthlyReportsAsync(dto.PeriodYear, dto.PeriodMonth, cancellationToken);
         return Ok(new { message = "Monthly usage reports generated." });
-    }
-
-    [HttpGet("invoices")]
-    public ActionResult<IEnumerable<BillingInvoiceDto>> GetInvoices()
-    {
-        var companies = _configDbContext.Companies.ToList();
-
-        var data = _configDbContext.BillingInvoices
-            .OrderByDescending(i => i.GeneratedAt)
-            .Take(200)
-            .ToList()
-            .Select(i =>
-            {
-                var company = companies.FirstOrDefault(c => c.Id == i.CompanyId);
-                return new BillingInvoiceDto(
-                    i.Id, i.CompanyId, company?.Name ?? "Unknown", company?.ShortCode ?? "?",
-                    i.PeriodStart, i.PeriodEnd, i.TotalAmount, i.Status, i.GeneratedAt, i.PaidAt);
-            })
-            .ToList();
-
-        return Ok(data);
-    }
-
-    [HttpPost("invoices/generate")]
-    public async Task<ActionResult<BillingInvoiceDto>> GenerateInvoice(
-        [FromBody] GenerateInvoiceDto dto,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var invoice = await _billingService.GenerateInvoiceAsync(
-                dto.CompanyId, dto.PeriodYear, dto.PeriodMonth, CurrentAdminId(), cancellationToken);
-            return Ok(invoice);
-        }
-        catch (InvalidOperationException)
-        {
-            return BadRequest(new { message = "Company not found." });
-        }
-    }
-
-    private Guid CurrentAdminId()
-    {
-        var claim = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub");
-        if (Guid.TryParse(claim, out var id) && _configDbContext.AdminUsers.Any(a => a.Id == id))
-            return id;
-
-        return _configDbContext.AdminUsers.OrderBy(a => a.CreatedAt).Select(a => a.Id).FirstOrDefault();
     }
 }

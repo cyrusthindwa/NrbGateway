@@ -111,41 +111,4 @@ public class BillingService : IBillingService
 
         await _configDbContext.SaveChangesAsync(cancellationToken);
     }
-
-    public async Task<BillingInvoiceDto> GenerateInvoiceAsync(
-        Guid companyId, int year, int month, Guid adminId, CancellationToken cancellationToken = default)
-    {
-        var company = _configDbContext.Companies.FirstOrDefault(c => c.Id == companyId)
-            ?? throw new InvalidOperationException("Company not found.");
-
-        var reports = _configDbContext.MonthlyUsageReports
-            .Where(m => m.CompanyId == companyId && m.PeriodYear == year && m.PeriodMonth == month)
-            .ToList();
-
-        var totalAmount = reports.Sum(r => r.TotalCost);
-
-        var periodStart = new DateOnly(year, month, 1);
-        var periodEnd = periodStart.AddMonths(1).AddDays(-1);
-
-        var invoice = new BillingInvoice
-        {
-            Id = Guid.NewGuid(),
-            CompanyId = companyId,
-            PeriodStart = periodStart,
-            PeriodEnd = periodEnd,
-            TotalAmount = totalAmount,
-            Status = BillingInvoiceStatus.PENDING,
-            GeneratedAt = DateTimeOffset.UtcNow,
-            PaidAt = null,
-            GeneratedBy = adminId
-        };
-
-        _configDbContext.Add(invoice);
-        await _configDbContext.SaveChangesAsync(cancellationToken);
-
-        return new BillingInvoiceDto(
-            invoice.Id, company.Id, company.Name, company.ShortCode,
-            invoice.PeriodStart, invoice.PeriodEnd, invoice.TotalAmount, invoice.Status,
-            invoice.GeneratedAt, invoice.PaidAt);
-    }
 }

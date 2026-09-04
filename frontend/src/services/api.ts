@@ -19,7 +19,6 @@ import type {
   NrbDowntimeIncident,
   BillingToday,
   MonthlyUsageReport,
-  BillingInvoice,
   PaginatedResponse,
   RevalidationResult,
 } from "@/types";
@@ -356,19 +355,6 @@ export const apiService = {
     periodMonth: number;
   }): Promise<{ message: string }> =>
     fetchWithAuth("/api/v1/portal/billing/monthly-reports/generate", {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
-
-  getInvoices: (): Promise<BillingInvoice[]> =>
-    fetchWithAuth("/api/v1/portal/billing/invoices"),
-
-  generateInvoice: (data: {
-    companyId: string;
-    periodYear: number;
-    periodMonth: number;
-  }): Promise<BillingInvoice> =>
-    fetchWithAuth("/api/v1/portal/billing/invoices/generate", {
       method: "POST",
       body: JSON.stringify(data),
     }),

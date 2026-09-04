@@ -291,25 +291,6 @@ public record MonthlyUsageReportDto(
     DateTimeOffset GeneratedAt
 );
 
-public record BillingInvoiceDto(
-    Guid Id,
-    Guid CompanyId,
-    string CompanyName,
-    string CompanyShortCode,
-    DateOnly PeriodStart,
-    DateOnly PeriodEnd,
-    decimal TotalAmount,
-    BillingInvoiceStatus Status,
-    DateTimeOffset GeneratedAt,
-    DateTimeOffset? PaidAt
-);
-
-public record GenerateInvoiceDto(
-    [Required] Guid CompanyId,
-    [Required][Range(2000, 2100)] int PeriodYear,
-    [Required][Range(1, 12)] int PeriodMonth
-);
-
 public record GenerateReportsDto(
     [Required][Range(2000, 2100)] int PeriodYear,
     [Required][Range(1, 12)] int PeriodMonth
