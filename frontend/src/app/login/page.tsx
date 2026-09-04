@@ -3,7 +3,7 @@
 import { useState, useEffect, FormEvent } from "react";
 import Image from "next/image";
 import { useAuth } from "@/contexts/AuthContext";
-import { Mail, Lock, AlertCircle, ShieldCheck, ArrowLeft } from "lucide-react";
+import { Mail, Lock, AlertCircle, ShieldCheck, ArrowLeft, Clock } from "lucide-react";
 
 export default function LoginPage() {
   const { requestOtp, verifyOtp, resendOtp } = useAuth();
@@ -14,8 +14,18 @@ export default function LoginPage() {
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
+  const [isTimedOut, setIsTimedOut] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("timeout") === "1" || params.get("reason") === "inactivity") {
+        setIsTimedOut(true);
+      }
+    }
+  }, []);
 
   useEffect(() => {
     if (resendCooldown <= 0) return;
@@ -107,6 +117,18 @@ export default function LoginPage() {
         <h2 className="text-lg font-semibold text-navy-800 mb-6">
           {step === "credentials" ? "Sign In" : "Two-factor verification"}
         </h2>
+
+        {isTimedOut && (
+          <div className="flex items-start gap-2.5 p-3.5 mb-5 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-sm animate-in fade-in">
+            <Clock size={18} className="text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold text-amber-900">Session Expired</p>
+              <p className="text-xs text-amber-700 mt-0.5">
+                You were signed out due to 10 minutes of inactivity. Please sign in to continue.
+              </p>
+            </div>
+          </div>
+        )}
 
         {error && (
           <div className="flex items-center gap-2 p-3 mb-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">

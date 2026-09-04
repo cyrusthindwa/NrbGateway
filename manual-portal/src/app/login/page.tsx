@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { Lock, Mail, AlertCircle, Loader2, KeyRound, ArrowLeft, RefreshCw, CheckCircle2 } from "lucide-react";
+import { Lock, Mail, AlertCircle, Loader2, KeyRound, ArrowLeft, RefreshCw, CheckCircle2, Clock } from "lucide-react";
 import { apiService } from "@/services/api";
 
 export default function LoginPage() {
@@ -13,6 +13,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [otpCode, setOtpCode] = useState("");
   const [userId, setUserId] = useState<string | null>(null);
+  const [isTimedOut, setIsTimedOut] = useState(false);
 
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -23,6 +24,15 @@ export default function LoginPage() {
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [cooldown, setCooldown] = useState(0);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("timeout") === "1" || params.get("reason") === "inactivity") {
+        setIsTimedOut(true);
+      }
+    }
+  }, []);
 
   useEffect(() => {
     let timer: NodeJS.Timeout;
@@ -54,6 +64,7 @@ export default function LoginPage() {
         setCooldown(60);
       } else if (res.token) {
         localStorage.setItem("manual_token", res.token);
+        localStorage.setItem("manual_last_activity", Date.now().toString());
         localStorage.setItem(
           "manual_user",
           JSON.stringify({
@@ -93,6 +104,7 @@ export default function LoginPage() {
       const res = await apiService.verify2Fa(userId, otpCode);
       if (res.token) {
         localStorage.setItem("manual_token", res.token);
+        localStorage.setItem("manual_last_activity", Date.now().toString());
         localStorage.setItem(
           "manual_user",
           JSON.stringify({
@@ -195,6 +207,19 @@ export default function LoginPage() {
               : "Set Your Permanent Password"}
           </p>
         </div>
+
+        {/* Inactivity Timeout Alert */}
+        {isTimedOut && (
+          <div className="bg-amber-50 border-l-4 border-amber-500 p-4 rounded text-sm text-amber-800 flex items-start space-x-3 animate-in fade-in">
+            <Clock className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold text-amber-900">Session Expired</p>
+              <p className="text-xs text-amber-700 mt-0.5">
+                You were logged out due to 10 minutes of inactivity. Please sign in again.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Success Message */}
         {successMessage && (
