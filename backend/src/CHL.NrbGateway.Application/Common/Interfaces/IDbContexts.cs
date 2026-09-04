@@ -36,9 +36,11 @@ public interface IConfigDbContext
     IQueryable<NrbHealthCheck> NrbHealthChecks { get; }
     IQueryable<NrbDowntimeIncident> NrbDowntimeIncidents { get; }
     IQueryable<NotificationChannel> NotificationChannels { get; }
+    IQueryable<CorsOrigin> CorsOrigins { get; }
 
     void Add<TEntity>(TEntity entity) where TEntity : class;
     void Update<TEntity>(TEntity entity) where TEntity : class;
+    void Remove<TEntity>(TEntity entity) where TEntity : class;
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

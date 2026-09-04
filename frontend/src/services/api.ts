@@ -21,6 +21,7 @@ import type {
   MonthlyUsageReport,
   PaginatedResponse,
   RevalidationResult,
+  CorsOrigin,
 } from "@/types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL;
@@ -357,5 +358,30 @@ export const apiService = {
     fetchWithAuth("/api/v1/portal/billing/monthly-reports/generate", {
       method: "POST",
       body: JSON.stringify(data),
+    }),
+
+  // CORS Origins
+  getCorsOrigins: (): Promise<CorsOrigin[]> =>
+    fetchWithAuth("/api/v1/portal/cors-origins"),
+
+  createCorsOrigin: (data: { origin: string; description?: string }): Promise<CorsOrigin> =>
+    fetchWithAuth("/api/v1/portal/cors-origins", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateCorsOriginStatus: (
+    id: string,
+    isEnabled: boolean,
+    description?: string
+  ): Promise<CorsOrigin> =>
+    fetchWithAuth(`/api/v1/portal/cors-origins/${id}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ isEnabled, description }),
+    }),
+
+  deleteCorsOrigin: (id: string): Promise<void> =>
+    fetchWithAuth(`/api/v1/portal/cors-origins/${id}`, {
+      method: "DELETE",
     }),
 };

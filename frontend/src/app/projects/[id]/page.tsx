@@ -6,7 +6,7 @@ import { Card, PageHeader, Button, Badge, StatusDot } from "@/components/ui/comm
 import { useAuth } from "@/contexts/AuthContext";
 import { useRouter, useParams } from "next/navigation";
 import { apiService } from "@/services/api";
-import { ArrowLeft, Key, RotateCw, Ban, Save } from "lucide-react";
+import { ArrowLeft, Key, RotateCw, Ban, Save, Copy, Check, X } from "lucide-react";
 import type { Project, ProjectApiKey, DailyUsage } from "@/types";
 import { formatDateTime } from "@/lib/format";
 import {
@@ -31,6 +31,40 @@ export default function ProjectDetailPage() {
   const [savingRateLimit, setSavingRateLimit] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [newKeyPlaintext, setNewKeyPlaintext] = useState<string | null>(null);
+  const [copiedKey, setCopiedKey] = useState(false);
+
+  function copyTextToClipboard(text: string) {
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.style.position = "fixed";
+        textarea.style.left = "-999999px";
+        textarea.style.top = "-999999px";
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        document.execCommand("copy");
+        textarea.remove();
+      }
+      setCopiedKey(true);
+      setTimeout(() => setCopiedKey(false), 2000);
+    } catch {
+      // Ignore if clipboard denied
+    }
+  }
+
+  function handleCopyAndClose() {
+    try {
+      if (newKeyPlaintext) {
+        copyTextToClipboard(newKeyPlaintext);
+      }
+    } finally {
+      setNewKeyPlaintext(null);
+    }
+  }
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -142,27 +176,50 @@ export default function ProjectDetailPage() {
 
       {/* New Key Modal */}
       {newKeyPlaintext && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 w-full max-w-lg shadow-xl">
-            <h3 className="text-lg font-semibold text-navy-800 mb-2">
-              New API Key Created
-            </h3>
-            <p className="text-sm text-slate-500 mb-4">
-              Copy this key now. You won&apos;t be able to see it again.
-            </p>
-            <div className="bg-slate-100 rounded-lg p-3 font-mono text-sm text-navy-800 break-all mb-4">
-              {newKeyPlaintext}
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-lg shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-lg font-bold text-navy-900">
+                New API Key Generated
+              </h3>
+              <button
+                type="button"
+                onClick={() => setNewKeyPlaintext(null)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition-colors"
+                title="Close"
+              >
+                <X size={20} />
+              </button>
             </div>
-            <Button
-              variant="primary"
-              onClick={() => {
-                navigator.clipboard.writeText(newKeyPlaintext);
-                setNewKeyPlaintext(null);
-              }}
-              className="w-full"
-            >
-              Copy & Close
-            </Button>
+            <p className="text-sm text-slate-500 mb-4">
+              Copy this key now and store it in a secure location. You will not be able to view this full key again.
+            </p>
+            <div className="relative bg-slate-900 rounded-xl p-4 font-mono text-sm text-emerald-400 break-all mb-5 border border-slate-800 shadow-inner flex items-center justify-between gap-3">
+              <span className="select-all">{newKeyPlaintext}</span>
+              <button
+                type="button"
+                onClick={() => copyTextToClipboard(newKeyPlaintext)}
+                className="shrink-0 p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition-colors"
+                title="Copy to clipboard"
+              >
+                {copiedKey ? <Check size={16} className="text-emerald-400" /> : <Copy size={16} />}
+              </button>
+            </div>
+            <div className="flex items-center justify-end gap-3">
+              <Button
+                variant="secondary"
+                onClick={() => setNewKeyPlaintext(null)}
+              >
+                Close
+              </Button>
+              <Button
+                variant="primary"
+                onClick={handleCopyAndClose}
+              >
+                {copiedKey ? <Check size={16} className="mr-1.5" /> : <Copy size={16} className="mr-1.5" />}
+                Copy & Close
+              </Button>
+            </div>
           </div>
         </div>
       )}

@@ -35,7 +35,8 @@ public enum SettingArea
     COMPANY,
     PROJECT,
     NOTIFICATION_CHANNEL,
-    MANUAL_PORTAL_USER
+    MANUAL_PORTAL_USER,
+    CORS_ORIGIN
 }
 
 public enum BillingInvoiceStatus

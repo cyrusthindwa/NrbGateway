@@ -103,6 +103,12 @@ public static class DependencyInjection
         services.AddScoped<IBillingService, BillingService>();
         services.AddHostedService<MonthlyUsageReportJob>();
 
+        // 8. Dynamic CORS Origin Manager
+        services.AddSingleton<ICorsOriginManager, CorsOriginManager>();
+
+        // 9. Diagnostic System Error Notification Service
+        services.AddScoped<IErrorNotifierService, ErrorNotifierService>();
+
         return services;
     }
 }

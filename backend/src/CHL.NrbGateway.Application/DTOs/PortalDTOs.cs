@@ -295,3 +295,22 @@ public record GenerateReportsDto(
     [Required][Range(2000, 2100)] int PeriodYear,
     [Required][Range(1, 12)] int PeriodMonth
 );
+
+public record CorsOriginDto(
+    Guid Id,
+    string Origin,
+    string? Description,
+    bool IsEnabled,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt
+);
+
+public record CreateCorsOriginDto(
+    [Required] string Origin,
+    string? Description
+);
+
+public record UpdateCorsOriginDto(
+    bool IsEnabled,
+    string? Description
+);

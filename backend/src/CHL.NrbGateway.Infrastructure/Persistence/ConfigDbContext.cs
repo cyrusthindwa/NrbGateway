@@ -22,9 +22,11 @@ public class ConfigDbContext : DbContext, IConfigDbContext
     public IQueryable<NrbHealthCheck> NrbHealthChecks => Set<NrbHealthCheck>();
     public IQueryable<NrbDowntimeIncident> NrbDowntimeIncidents => Set<NrbDowntimeIncident>();
     public IQueryable<NotificationChannel> NotificationChannels => Set<NotificationChannel>();
+    public IQueryable<CorsOrigin> CorsOrigins => Set<CorsOrigin>();
 
     void IConfigDbContext.Add<TEntity>(TEntity entity) where TEntity : class => base.Add(entity);
     void IConfigDbContext.Update<TEntity>(TEntity entity) where TEntity : class => base.Update(entity);
+    void IConfigDbContext.Remove<TEntity>(TEntity entity) where TEntity : class => base.Remove(entity);
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -191,6 +193,13 @@ public class ConfigDbContext : DbContext, IConfigDbContext
             entity.HasOne(e => e.CreatedByAdmin)
                 .WithMany(a => a.CreatedNotificationChannels)
                 .HasForeignKey(e => e.CreatedBy);
+        });
+
+        modelBuilder.Entity<CorsOrigin>(entity =>
+        {
+            entity.ToTable("cors_origins");
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.Origin).IsUnique();
         });
     }
 }

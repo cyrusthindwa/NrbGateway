@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json.Serialization;
 using CHL.NrbGateway.Api.Gateway.Authentication;
+using CHL.NrbGateway.Api.Gateway.Middleware;
 using CHL.NrbGateway.Api.Gateway.RateLimiting;
 using CHL.NrbGateway.Application.Common.Interfaces;
 using CHL.NrbGateway.Domain.Entities.Config;
@@ -56,17 +57,14 @@ builder.Services.AddAuthentication(options =>
     };
 });
 
-// CORS: explicit allow-list of the two known frontend origins (admin console + manual portal).
-// Configurable via Cors:AllowedOrigins (comma-separated) in appsettings / environment.
-var allowedOrigins = (builder.Configuration["Cors:AllowedOrigins"]
-        ?? "http://localhost:3000,http://localhost:3001,http://kyc-dev.continental.mw,http://manual.kyc-dev.continental.mw")
-    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+// CORS: dynamic allow-list managed via ICorsOriginManager and persisted in config.cors_origins.
+ICorsOriginManager? corsOriginManager = null;
 
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
-        policy.WithOrigins(allowedOrigins)
+        policy.SetIsOriginAllowed(origin => corsOriginManager?.IsOriginAllowed(origin) ?? true)
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials();
@@ -149,7 +147,10 @@ builder.Services.AddSwaggerGen(c =>
 
 var app = builder.Build();
 
+corsOriginManager = app.Services.GetRequiredService<ICorsOriginManager>();
+
 // 5. HTTP Pipeline
+app.UseMiddleware<GlobalErrorHandlingMiddleware>();
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -194,6 +195,24 @@ using (var scope = app.Services.CreateScope())
             kycDb.Database.Migrate();
 
             configDb.Database.ExecuteSqlRaw(@"ALTER TABLE config.projects ADD COLUMN IF NOT EXISTS ""ProjectType"" TEXT NOT NULL DEFAULT 'SYSTEM_INTEGRATION';");
+
+            try
+            {
+                configDb.Database.ExecuteSqlRaw(@"
+                    CREATE TABLE IF NOT EXISTS config.cors_origins (
+                        ""Id"" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        ""Origin"" TEXT NOT NULL UNIQUE,
+                        ""Description"" TEXT NULL,
+                        ""IsEnabled"" BOOLEAN NOT NULL DEFAULT TRUE,
+                        ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        ""UpdatedAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    );
+                ");
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "Raw DDL table creation for cors_origins skipped, ensuring created via EF Core...");
+            }
 
             var manualDb = scope.ServiceProvider.GetRequiredService<ManualPortalDbContext>();
             try
@@ -344,6 +363,52 @@ using (var scope = app.Services.CreateScope())
                     Log.Information("Dev seed manual portal user created: agent@cdhbank.mw / Password123!");
                 }
             }
+
+            // Default notification channel (email alerts)
+            if (!configDb.NotificationChannels.Any())
+            {
+                var adminUser = configDb.AdminUsers.FirstOrDefault();
+                var adminId = adminUser?.Id ?? Guid.Empty;
+                configDb.Add(new NotificationChannel
+                {
+                    Id = Guid.NewGuid(),
+                    ChannelType = NotificationChannelType.EMAIL,
+                    Target = "cthindwa@continental.mw",
+                    Enabled = true,
+                    CreatedBy = adminId,
+                    CreatedAt = DateTimeOffset.UtcNow
+                });
+                configDb.SaveChanges();
+            }
+
+            // Default CORS origins
+            if (!configDb.CorsOrigins.Any())
+            {
+                var defaultCorsOrigins = (builder.Configuration["Cors:AllowedOrigins"]
+                        ?? "http://localhost:3000,http://localhost:3001,http://kyc-dev.continental.mw,http://manual.kyc-dev.continental.mw")
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+                foreach (var orig in defaultCorsOrigins)
+                {
+                    configDb.Add(new CorsOrigin
+                    {
+                        Id = Guid.NewGuid(),
+                        Origin = orig.Trim().TrimEnd('/'),
+                        Description = "Default system origin",
+                        IsEnabled = true,
+                        CreatedAt = DateTimeOffset.UtcNow,
+                        UpdatedAt = DateTimeOffset.UtcNow
+                    });
+                }
+                configDb.SaveChanges();
+            }
+
+            // Sync active origins to dynamic CORS manager
+            var activeCorsOrigins = configDb.CorsOrigins
+                .Where(c => c.IsEnabled)
+                .Select(c => c.Origin)
+                .ToList();
+            corsOriginManager.Reload(activeCorsOrigins);
         }
     }
     catch (Exception ex)

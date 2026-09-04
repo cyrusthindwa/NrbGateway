@@ -226,3 +226,12 @@ export interface MonthlyUsageReport {
   totalCost: number;
   generatedAt: string;
 }
+
+export interface CorsOrigin {
+  id: string;
+  origin: string;
+  description: string | null;
+  isEnabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}

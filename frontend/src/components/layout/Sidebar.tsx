@@ -17,6 +17,7 @@ import {
   CreditCard,
   RefreshCw,
   Activity,
+  Settings,
 } from "lucide-react";
 
 const navItems = [
@@ -31,6 +32,7 @@ const navItems = [
   { href: "/billing", label: "Billing", icon: CreditCard },
   { href: "/revalidation", label: "Revalidation", icon: RefreshCw },
   { href: "/uptime", label: "NRB Uptime", icon: Activity },
+  { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 export default function Sidebar() {

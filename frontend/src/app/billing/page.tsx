@@ -107,13 +107,20 @@ export default function BillingPage() {
                   {company.companyTotalRequests} requests · MWK {company.companyTotalCost.toFixed(2)}
                 </span>
               </div>
-              <table className="w-full text-sm">
-                <tbody>
+              <table className="w-full text-sm table-fixed">
+                <thead>
+                  <tr className="text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                    <th className="w-1/2 pb-2 font-medium">Project</th>
+                    <th className="w-1/4 pb-2 text-right font-medium">Billable Requests</th>
+                    <th className="w-1/4 pb-2 text-right font-medium">Total Cost</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
                   {company.projects.map((p) => (
-                    <tr key={p.projectId} className="border-t border-slate-100">
-                      <td className="py-2.5 text-slate-700 font-medium">{p.projectName}</td>
-                      <td className="py-2.5 text-right text-slate-500">{p.totalRequests} billable requests</td>
-                      <td className="py-2.5 text-right font-mono font-semibold text-slate-700">
+                    <tr key={p.projectId} className="hover:bg-slate-100/50 transition-colors">
+                      <td className="py-2.5 text-slate-700 font-medium truncate pr-4">{p.projectName}</td>
+                      <td className="py-2.5 text-right font-mono text-slate-600">{p.totalRequests}</td>
+                      <td className="py-2.5 text-right font-mono font-semibold text-slate-800">
                         MWK {p.totalCost.toFixed(2)}
                       </td>
                     </tr>
