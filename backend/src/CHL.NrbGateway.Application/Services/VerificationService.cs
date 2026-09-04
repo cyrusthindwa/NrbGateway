@@ -285,9 +285,13 @@ public class VerificationService : IVerificationService
                 await _kycDbContext.SaveChangesAsync(cancellationToken);
             }
 
+            var simEvt = PersistVerificationEvent(subject.SubjectId, pinHash, request.IdNumber, NrbTier.TEXT_LOOKUP,
+                projectCode, requestTimestamp, DateTimeOffset.UtcNow, IdentityVerifiedStatus, null,
+                ResponseMode.DETAILED, TriggerSource.PROJECT_REQUEST, null, null);
+
             var (sPhoto, sFinger) = GetDocumentRefs(simIndividual.SubjectId);
-            var simGw = PersistGatewayRequest(projectId, subject.SubjectId, ServedFrom.CACHE, null,
-                IdentityVerifiedStatus, null, requestTimestamp);
+            var simGw = PersistGatewayRequest(projectId, subject.SubjectId, ServedFrom.NRB, simEvt.Id,
+                IdentityVerifiedStatus, TierCost(NrbTier.TEXT_LOOKUP), requestTimestamp);
             await _kycDbContext.SaveChangesAsync(cancellationToken);
             return new TextLookupResultDto(
                 simGw.Id,
@@ -299,7 +303,7 @@ public class VerificationService : IVerificationService
                 simIndividual.Gender ?? "",
                 sPhoto,
                 sFinger,
-                ServedFrom.CACHE,
+                ServedFrom.NRB,
                 true,
                 requestTimestamp,
                 simIndividual.CardStatus ?? "VALID",

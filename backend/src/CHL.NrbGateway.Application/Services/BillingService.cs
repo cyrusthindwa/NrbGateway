@@ -21,8 +21,9 @@ public class BillingService : IBillingService
         var now = DateTimeOffset.UtcNow;
         var today = new DateTimeOffset(now.Year, now.Month, now.Day, 0, 0, 0, TimeSpan.Zero);
 
+        // Only track cache misses (requests served from NRB) for billing, not internal database cache hits
         var requests = _kycDbContext.GatewayRequests
-            .Where(r => r.RequestTimestamp >= today)
+            .Where(r => r.RequestTimestamp >= today && r.ServedFrom == ServedFrom.NRB)
             .ToList();
 
         var projects = _configDbContext.Projects.ToList();
@@ -69,8 +70,9 @@ public class BillingService : IBillingService
         var start = new DateTimeOffset(year, month, 1, 0, 0, 0, TimeSpan.Zero);
         var end = start.AddMonths(1);
 
+        // Only track cache misses (requests served from NRB) for billing, not internal database cache hits
         var requests = _kycDbContext.GatewayRequests
-            .Where(r => r.RequestTimestamp >= start && r.RequestTimestamp < end)
+            .Where(r => r.RequestTimestamp >= start && r.RequestTimestamp < end && r.ServedFrom == ServedFrom.NRB)
             .ToList();
 
         var projects = _configDbContext.Projects.ToList();
