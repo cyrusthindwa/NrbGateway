@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState, FormEvent } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { apiService } from "@/services/api";
-import { Building2, Lock, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Lock, AlertCircle, CheckCircle2 } from "lucide-react";
 
 export default function ResetPasswordPage() {
   const router = useRouter();
@@ -51,9 +52,16 @@ export default function ResetPasswordPage() {
 
   return (
     <div className="min-h-screen bg-navy-900 flex flex-col items-center justify-center px-4">
-      <div className="mb-8 text-center">
-        <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-white/10 backdrop-blur mb-4">
-          <Building2 size={40} className="text-orange-500" />
+      <div className="mb-8 text-center flex flex-col items-center">
+        <div className="inline-flex items-center justify-center p-3 rounded-2xl bg-white shadow-xl mb-4 border border-white/20">
+          <Image
+            src="/logo.png"
+            alt="Continental Holdings Limited"
+            width={72}
+            height={72}
+            className="h-16 w-auto object-contain"
+            priority
+          />
         </div>
         <h1 className="text-2xl font-bold text-white">NRB Gateway Console</h1>
         <p className="text-slate-400 text-sm mt-1">Continental Holdings Limited — ICT Admin</p>

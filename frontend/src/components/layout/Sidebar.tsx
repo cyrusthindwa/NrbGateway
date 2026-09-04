@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -39,16 +40,22 @@ export default function Sidebar() {
   return (
     <aside className="fixed left-0 top-0 h-full w-64 bg-navy-900 flex flex-col z-50">
       {/* Logo / Brand */}
-      <div className="px-6 py-6 border-b border-navy-700">
+      <div className="px-6 py-5 border-b border-navy-700">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-orange-500 flex items-center justify-center">
-            <span className="text-white font-bold text-sm">CHL</span>
+          <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center p-1 shadow-sm shrink-0">
+            <Image
+              src="/logo.png"
+              alt="CHL Logo"
+              width={36}
+              height={36}
+              className="h-8 w-auto object-contain"
+            />
           </div>
           <div>
-            <h1 className="text-white font-semibold text-sm leading-tight">
+            <h1 className="text-white font-bold text-sm leading-tight">
               NRB Gateway
             </h1>
-            <p className="text-slate-400 text-xs">ICT Admin Console</p>
+            <p className="text-slate-400 text-xs font-medium">ICT Admin Console</p>
           </div>
         </div>
       </div>

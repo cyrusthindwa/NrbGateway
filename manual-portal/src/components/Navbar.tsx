@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Search, History, LogOut, ShieldCheck, User } from "lucide-react";
+import { Search, History, LogOut, User } from "lucide-react";
 import { ManualUser } from "@/types";
 
 export default function Navbar() {
@@ -37,11 +38,17 @@ export default function Navbar() {
           {/* Brand Logo / Title */}
           <div className="flex items-center space-x-3">
             <Link href="/" className="flex items-center space-x-3 group">
-              <div className="w-10 h-10 rounded-lg bg-[#F48220] flex items-center justify-center font-bold text-white shadow-sm">
-                <ShieldCheck className="w-6 h-6 text-white" />
+              <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center p-1 shadow-sm shrink-0">
+                <Image
+                  src="/logo.png"
+                  alt="Continental Holdings Limited"
+                  width={36}
+                  height={36}
+                  className="h-8 w-auto object-contain"
+                />
               </div>
               <div>
-                <span className="text-lg font-bold tracking-wider text-white block leading-tight">
+                <span className="text-base sm:text-lg font-bold tracking-wider text-white block leading-tight">
                   CONTINENTAL HOLDINGS
                 </span>
                 <span className="text-xs text-amber-200/90 font-medium tracking-wide uppercase">

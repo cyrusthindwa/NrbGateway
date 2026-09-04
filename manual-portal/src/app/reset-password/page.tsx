@@ -1,8 +1,9 @@
 "use client";
 
 import { Suspense, useState, FormEvent } from "react";
+import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Lock, ShieldCheck, AlertCircle, Loader2, KeyRound, CheckCircle2 } from "lucide-react";
+import { Lock, AlertCircle, Loader2, KeyRound, CheckCircle2 } from "lucide-react";
 import { apiService } from "@/services/api";
 
 function ResetPasswordForm() {
@@ -52,9 +53,16 @@ function ResetPasswordForm() {
   return (
     <div className="min-h-[80vh] flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8 bg-white p-8 rounded-xl shadow-lg border border-slate-200">
-        <div className="text-center">
-          <div className="mx-auto w-14 h-14 bg-[#292D6B] rounded-xl flex items-center justify-center text-[#F48220] shadow-md mb-4">
-            <ShieldCheck className="w-8 h-8 text-[#F48220]" />
+        <div className="text-center flex flex-col items-center">
+          <div className="inline-flex items-center justify-center p-3 rounded-2xl bg-white shadow-md border border-slate-100 mb-4">
+            <Image
+              src="/logo.png"
+              alt="Continental Holdings Limited"
+              width={72}
+              height={72}
+              className="h-16 w-auto object-contain"
+              priority
+            />
           </div>
           <h1 className="text-2xl font-extrabold text-[#292D6B] tracking-tight">
             Reset Password

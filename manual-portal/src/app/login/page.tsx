@@ -1,22 +1,27 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { ShieldCheck, Lock, Mail, AlertCircle, Loader2, KeyRound, ArrowLeft, RefreshCw } from "lucide-react";
+import { Lock, Mail, AlertCircle, Loader2, KeyRound, ArrowLeft, RefreshCw, CheckCircle2 } from "lucide-react";
 import { apiService } from "@/services/api";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [step, setStep] = useState<"LOGIN" | "2FA">("LOGIN");
+  const [step, setStep] = useState<"LOGIN" | "2FA" | "CHANGE_PASSWORD">("LOGIN");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [otpCode, setOtpCode] = useState("");
   const [userId, setUserId] = useState<string | null>(null);
 
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [cooldown, setCooldown] = useState(0);
 
   useEffect(() => {
@@ -37,6 +42,7 @@ export default function LoginPage() {
     setLoading(true);
     setError(null);
     setInfoMessage(null);
+    setSuccessMessage(null);
 
     try {
       const res = await apiService.login(email, password);
@@ -47,7 +53,6 @@ export default function LoginPage() {
         setInfoMessage(res.message || "A 6-digit verification code has been sent to your email.");
         setCooldown(60);
       } else if (res.token) {
-        // Direct login if 2FA is bypassed
         localStorage.setItem("manual_token", res.token);
         localStorage.setItem(
           "manual_user",
@@ -58,7 +63,13 @@ export default function LoginPage() {
             companyName: res.companyName,
           })
         );
-        router.push("/");
+
+        if (res.mustChangePassword) {
+          setStep("CHANGE_PASSWORD");
+          setInfoMessage("First-time sign in: Please set a secure password of your choice to continue.");
+        } else {
+          router.push("/");
+        }
       }
     } catch (err: any) {
       setError(err.message || "Invalid credentials. Please try again.");
@@ -76,6 +87,7 @@ export default function LoginPage() {
 
     setLoading(true);
     setError(null);
+    setInfoMessage(null);
 
     try {
       const res = await apiService.verify2Fa(userId, otpCode);
@@ -90,12 +102,47 @@ export default function LoginPage() {
             companyName: res.companyName,
           })
         );
-        router.push("/");
+
+        if (res.mustChangePassword) {
+          setStep("CHANGE_PASSWORD");
+          setInfoMessage("First-time sign in: Please set a secure password of your choice to continue.");
+        } else {
+          router.push("/");
+        }
       } else {
         setError(res.message || "Verification failed.");
       }
     } catch (err: any) {
       setError(err.message || "Invalid verification code. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleChangePasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setSuccessMessage(null);
+
+    if (newPassword.length < 8) {
+      setError("New password must be at least 8 characters long.");
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await apiService.changePassword(newPassword);
+      setSuccessMessage("Password changed successfully! Redirecting to portal...");
+      setTimeout(() => {
+        router.push("/");
+      }, 1500);
+    } catch (err: any) {
+      setError(err.message || "Failed to update password. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -123,9 +170,16 @@ export default function LoginPage() {
     <div className="min-h-[80vh] flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8 bg-white p-8 rounded-xl shadow-lg border border-slate-200">
         {/* Brand Header */}
-        <div className="text-center">
-          <div className="mx-auto w-14 h-14 bg-[#292D6B] rounded-xl flex items-center justify-center text-[#F48220] shadow-md mb-4">
-            <ShieldCheck className="w-8 h-8 text-[#F48220]" />
+        <div className="text-center flex flex-col items-center">
+          <div className="inline-flex items-center justify-center p-3 rounded-2xl bg-white shadow-md border border-slate-100 mb-4">
+            <Image
+              src="/logo.png"
+              alt="Continental Holdings Limited"
+              width={72}
+              height={72}
+              className="h-16 w-auto object-contain"
+              priority
+            />
           </div>
           <h1 className="text-2xl font-extrabold text-[#292D6B] tracking-tight">
             CONTINENTAL HOLDINGS
@@ -136,9 +190,19 @@ export default function LoginPage() {
           <p className="mt-2 text-xs text-slate-500">
             {step === "LOGIN"
               ? "Manual Identity Verification for Subsidiary Staff"
-              : "Two-Factor Authentication Verification"}
+              : step === "2FA"
+              ? "Two-Factor Authentication Verification"
+              : "Set Your Permanent Password"}
           </p>
         </div>
+
+        {/* Success Message */}
+        {successMessage && (
+          <div className="bg-green-50 border-l-4 border-green-500 p-4 rounded text-sm text-green-700 flex items-start space-x-3">
+            <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0 mt-0.5" />
+            <span>{successMessage}</span>
+          </div>
+        )}
 
         {/* Info Message */}
         {infoMessage && (
@@ -306,6 +370,82 @@ export default function LoginPage() {
                   </span>
                 </button>
               </div>
+            </div>
+          </form>
+        )}
+
+        {/* STEP 3: FIRST-TIME PASSWORD CHANGE */}
+        {step === "CHANGE_PASSWORD" && (
+          <form className="mt-6 space-y-6" onSubmit={handleChangePasswordSubmit}>
+            <div className="space-y-4">
+              <div>
+                <label
+                  htmlFor="newPassword"
+                  className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1"
+                >
+                  New Password
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <Lock className="h-5 w-5 text-slate-400" />
+                  </div>
+                  <input
+                    id="newPassword"
+                    name="newPassword"
+                    type="password"
+                    autoComplete="new-password"
+                    required
+                    minLength={8}
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    className="pl-10 block w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#F48220] focus:border-transparent transition-all"
+                    placeholder="At least 8 characters"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="confirmPassword"
+                  className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1"
+                >
+                  Confirm New Password
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <KeyRound className="h-5 w-5 text-slate-400" />
+                  </div>
+                  <input
+                    id="confirmPassword"
+                    name="confirmPassword"
+                    type="password"
+                    autoComplete="new-password"
+                    required
+                    minLength={8}
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    className="pl-10 block w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#F48220] focus:border-transparent transition-all"
+                    placeholder="Re-enter new password"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-md text-sm font-bold text-white bg-[#F48220] hover:bg-[#db6e10] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#F48220] disabled:opacity-50 transition-colors cursor-pointer"
+              >
+                {loading ? (
+                  <span className="flex items-center space-x-2">
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <span>Saving New Password...</span>
+                  </span>
+                ) : (
+                  "Save Password & Continue"
+                )}
+              </button>
             </div>
           </form>
         )}
