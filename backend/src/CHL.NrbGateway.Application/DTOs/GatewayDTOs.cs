@@ -65,7 +65,13 @@ public record TextLookupResultDto(
     DateTimeOffset Timestamp,
     string? CardStatus = "VALID",
     DateOnly? IssueDate = null,
-    DateOnly? ExpiryDate = null
+    DateOnly? ExpiryDate = null,
+    string? Nationality = null,
+    string? CivilStatus = null,
+    string? BirthDistrict = null,
+    string? ResidenceAddress = null,
+    string? NrbRegisteredPhone = null,
+    string? MiddlewareStatus = null
 );
 
 // ── Advanced (Tier 4) — Biometric + OTP ──────────────────────────────

@@ -25,6 +25,12 @@ export interface VerificationResult {
   otherNames?: string | null;
   dateOfBirth: string;
   gender: string;
+  nationality?: string | null;
+  civilStatus?: string | null;
+  birthDistrict?: string | null;
+  residenceAddress?: string | null;
+  nrbRegisteredPhone?: string | null;
+  middlewareStatus?: string | null;
   photoRef?: string | null;
   fingerprintRef?: string | null;
   servedFrom: string;

@@ -231,11 +231,29 @@ public class VerificationService : IVerificationService
                 var cachedGw = PersistGatewayRequest(projectId, subject.SubjectId, ServedFrom.CACHE,
                     cached.Id, cached.ResponseStatus, null, requestTimestamp);
                 await _kycDbContext.SaveChangesAsync(cancellationToken);
-                return new TextLookupResultDto(cachedGw.Id, request.IdNumber,
-                    cachedIndividual.Surname ?? "", cachedIndividual.FirstName ?? "", cachedIndividual.OtherNames,
-                    cachedIndividual.DateOfBirth ?? DateOnly.MinValue, cachedIndividual.Gender ?? "",
-                    photoRef, fingerprintRef, ServedFrom.CACHE, true, requestTimestamp,
-                    cachedIndividual.CardStatus ?? "VALID", cachedIndividual.IdDateOfIssue, cachedIndividual.IdDateOfExpiry);
+                return new TextLookupResultDto(
+                    cachedGw.Id,
+                    request.IdNumber,
+                    cachedIndividual.Surname ?? "",
+                    cachedIndividual.FirstName ?? "",
+                    cachedIndividual.OtherNames,
+                    cachedIndividual.DateOfBirth ?? DateOnly.MinValue,
+                    cachedIndividual.Gender ?? "",
+                    photoRef,
+                    fingerprintRef,
+                    ServedFrom.CACHE,
+                    true,
+                    requestTimestamp,
+                    cachedIndividual.CardStatus ?? "VALID",
+                    cachedIndividual.IdDateOfIssue,
+                    cachedIndividual.IdDateOfExpiry,
+                    cachedIndividual.Nationality ?? "MALAWIAN",
+                    cachedIndividual.CivilStatus,
+                    cachedIndividual.BirthDistrict,
+                    cachedIndividual.ResidenceAddress,
+                    cachedIndividual.NrbRegisteredPhone,
+                    cachedIndividual.MiddlewareStatus ?? "CLEAR"
+                );
             }
         }
 
@@ -252,7 +270,13 @@ public class VerificationService : IVerificationService
                     OtherNames = "JOHN",
                     DateOfBirth = new DateOnly(1990, 5, 15),
                     Gender = "MALE",
+                    Nationality = "MALAWIAN",
+                    CivilStatus = "MARRIED",
+                    BirthDistrict = "LILONGWE",
+                    ResidenceAddress = "Plot 12, Area 10, Lilongwe",
+                    NrbRegisteredPhone = "+265999000111",
                     CardStatus = "VALID",
+                    MiddlewareStatus = "CLEAR",
                     IdDateOfIssue = new DateOnly(2020, 1, 10),
                     IdDateOfExpiry = new DateOnly(2030, 1, 10),
                     CreatedAt = DateTimeOffset.UtcNow
@@ -265,11 +289,29 @@ public class VerificationService : IVerificationService
             var simGw = PersistGatewayRequest(projectId, subject.SubjectId, ServedFrom.CACHE, null,
                 IdentityVerifiedStatus, null, requestTimestamp);
             await _kycDbContext.SaveChangesAsync(cancellationToken);
-            return new TextLookupResultDto(simGw.Id, request.IdNumber,
-                simIndividual.Surname ?? "", simIndividual.FirstName ?? "", simIndividual.OtherNames,
-                simIndividual.DateOfBirth ?? DateOnly.MinValue, simIndividual.Gender ?? "",
-                sPhoto, sFinger, ServedFrom.CACHE, true, requestTimestamp,
-                simIndividual.CardStatus ?? "VALID", simIndividual.IdDateOfIssue, simIndividual.IdDateOfExpiry);
+            return new TextLookupResultDto(
+                simGw.Id,
+                request.IdNumber,
+                simIndividual.Surname ?? "",
+                simIndividual.FirstName ?? "",
+                simIndividual.OtherNames,
+                simIndividual.DateOfBirth ?? DateOnly.MinValue,
+                simIndividual.Gender ?? "",
+                sPhoto,
+                sFinger,
+                ServedFrom.CACHE,
+                true,
+                requestTimestamp,
+                simIndividual.CardStatus ?? "VALID",
+                simIndividual.IdDateOfIssue,
+                simIndividual.IdDateOfExpiry,
+                simIndividual.Nationality ?? "MALAWIAN",
+                simIndividual.CivilStatus ?? "MARRIED",
+                simIndividual.BirthDistrict ?? "LILONGWE",
+                simIndividual.ResidenceAddress ?? "Plot 12, Area 10, Lilongwe",
+                simIndividual.NrbRegisteredPhone ?? "+265999000111",
+                simIndividual.MiddlewareStatus ?? "CLEAR"
+            );
         }
 
         _logger.LogInformation("Calling NRB Text Lookup live for PIN {Hash}", pinHash);
@@ -285,9 +327,10 @@ public class VerificationService : IVerificationService
             var nfGw = PersistGatewayRequest(projectId, subject.SubjectId, ServedFrom.NRB, null,
                 NotFoundStatus, TierCost(NrbTier.TEXT_LOOKUP), requestTimestamp);
             await _kycDbContext.SaveChangesAsync(cancellationToken);
-            return new TextLookupResultDto(nfGw.Id, request.IdNumber,
+            return new TextLookupResultDto(
+                nfGw.Id, request.IdNumber,
                 "", "", null, DateOnly.MinValue, "", null, null, ServedFrom.NRB, false, requestTimestamp,
-                "NOT FOUND", null, null);
+                "NOT FOUND", null, null, null, null, null, null, null, null);
         }
 
         var individual = EnsureIndividual(subject.SubjectId, requestTimestamp);
@@ -308,11 +351,29 @@ public class VerificationService : IVerificationService
         await _kycDbContext.SaveChangesAsync(cancellationToken);
 
         var (faceRef, fingerRef) = GetDocumentRefs(subject.SubjectId);
-        return new TextLookupResultDto(gw.Id, request.IdNumber,
-            nrbResp.Surname, nrbResp.FirstName, nrbResp.OtherNames,
-            nrbResp.DateOfBirth, nrbResp.Gender, faceRef, fingerRef,
-            ServedFrom.NRB, true, requestTimestamp,
-            nrbResp.CardStatus ?? "VALID", nrbResp.IssueDate, nrbResp.ExpiryDate);
+        return new TextLookupResultDto(
+            gw.Id,
+            request.IdNumber,
+            nrbResp.Surname,
+            nrbResp.FirstName,
+            nrbResp.OtherNames,
+            nrbResp.DateOfBirth,
+            nrbResp.Gender,
+            faceRef,
+            fingerRef,
+            ServedFrom.NRB,
+            true,
+            requestTimestamp,
+            nrbResp.CardStatus ?? "VALID",
+            nrbResp.IssueDate,
+            nrbResp.ExpiryDate,
+            "MALAWIAN",
+            nrbResp.MaritalStatus,
+            nrbResp.BirthDistrict,
+            nrbResp.ResidentialAddress,
+            nrbResp.TelephoneNumber,
+            individual.MiddlewareStatus ?? "CLEAR"
+        );
     }
 
     // ═══════════════════════════════════════════════════════════════════
